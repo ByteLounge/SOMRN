@@ -196,4 +196,4 @@ def update_charts(n):
     except Exception as e: return [dash.no_update]*7
 
 def run_dashboard(port=8050):
-    app.run_server(debug=False, port=port, use_reloader=False)
+    app.run(debug=False, port=port)
