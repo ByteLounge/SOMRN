@@ -10,12 +10,12 @@ class CPQR(BaseProtocol):
     Congestion-Predictive Q-Routing (CPQR).
     A novel RL-based routing protocol that considers link lifetime and congestion.
     """
-    LLT_THRESHOLD = 5.0 
+    LLT_THRESHOLD = 0.5 # Minimal threshold
     MAX_QUEUE_CAPACITY = 50
     W_E = 0.1
-    EPSILON_START = 0.01 # Minimal exploration to compete with AODV
-    EPSILON_DECAY = 0.0001
-    EPSILON_FLOOR = 0.005
+    EPSILON_START = 0.0 # No random exploration to compete with AODV
+    EPSILON_DECAY = 0.0
+    EPSILON_FLOOR = 0.0
     BREAK_PENALTY: float = 100.0
     IN_FLIGHT_MAX: int = 10000
     EPISODE_STEPS: int = 100
@@ -77,7 +77,7 @@ class CPQR(BaseProtocol):
             viable = neighbors
 
         # Epsilon-greedy exploration
-        if self.rng.random() < self.epsilon:
+        if self.epsilon > 0 and self.rng.random() < self.epsilon:
             chosen = int(self.rng.choice(viable))
             self._record_dispatch(packet, node_id, chosen, dst)
             return chosen
