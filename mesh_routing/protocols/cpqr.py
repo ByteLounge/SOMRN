@@ -10,12 +10,12 @@ class CPQR(BaseProtocol):
     Congestion-Predictive Q-Routing (CPQR).
     A novel RL-based routing protocol that considers link lifetime and congestion.
     """
-    LLT_THRESHOLD = 0.5 # Minimal threshold
+    LLT_THRESHOLD = 1.0 
     MAX_QUEUE_CAPACITY = 50
     W_E = 0.1
-    EPSILON_START = 0.0 # No random exploration to compete with AODV
-    EPSILON_DECAY = 0.0
-    EPSILON_FLOOR = 0.0
+    EPSILON_START = 0.05 # Balanced exploration
+    EPSILON_DECAY = 0.001
+    EPSILON_FLOOR = 0.01
     BREAK_PENALTY: float = 100.0
     IN_FLIGHT_MAX: int = 10000
     EPISODE_STEPS: int = 100
@@ -29,6 +29,7 @@ class CPQR(BaseProtocol):
         
         self.epsilon = self.EPSILON_START
         self._step_count = 0
+        self.alpha = 0.8 # Faster adaptation for high mobility
         
         for n in network.nodes:
             self.Q[n] = {}
@@ -77,7 +78,7 @@ class CPQR(BaseProtocol):
             viable = neighbors
 
         # Epsilon-greedy exploration
-        if self.epsilon > 0 and self.rng.random() < self.epsilon:
+        if self.rng.random() < self.epsilon:
             chosen = int(self.rng.choice(viable))
             self._record_dispatch(packet, node_id, chosen, dst)
             return chosen
@@ -148,7 +149,7 @@ class CPQR(BaseProtocol):
                 next_qs = [q for nb, q in self.Q.get(v, {}).get(dst, {}).items() if q < self.BREAK_PENALTY]
                 min_q_next = min(next_qs) if next_qs else 0.0
                 
-                new_q = (1 - self.config.alpha) * old_q + self.config.alpha * (reward + self.config.gamma * min_q_next)
+                new_q = (1 - self.alpha) * old_q + self.alpha * (reward + self.config.gamma * min_q_next)
                 self.Q[u][dst][v] = new_q
             
             del self.in_flight[packet.packet_id]

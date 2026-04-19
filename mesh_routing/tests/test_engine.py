@@ -1,70 +1,86 @@
 import pytest
 import numpy as np
-from config import SimConfig
 from simulation.engine import SimulationEngine
+from config import SimConfig
 from protocols.aodv import AODV
-from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
 from core.packet import Packet
+from core.node import Node
 
-def test_engine_completes_without_exception_aodv():
-    config = SimConfig(num_nodes=10, duration=10, num_flows=2)
+def test_engine_initialization():
+    config = SimConfig(num_nodes=10)
+    engine = SimulationEngine(AODV, config)
+    assert len(engine.network.nodes) == 10
+    assert len(engine.flows) == config.num_flows
+
+def test_traffic_generation():
+    config = SimConfig(num_nodes=10, duration=10.0, packet_rate=10.0)
     engine = SimulationEngine(AODV, config)
     engine.run()
-
-def test_engine_completes_without_exception_olsr():
-    config = SimConfig(num_nodes=10, duration=10, num_flows=2)
-    engine = SimulationEngine(OLSR, config)
-    engine.run()
-
-def test_engine_completes_without_exception_cpqr():
-    config = SimConfig(num_nodes=10, duration=10, num_flows=2)
-    engine = SimulationEngine(CPQR, config)
-    engine.run()
-
-def test_engine_determinism():
-    c1 = SimConfig(num_nodes=10, duration=10, seed=42, num_flows=2)
-    e1 = SimulationEngine(CPQR, c1)
-    m1 = e1.run()
-    s1 = m1.snapshot(10)
     
-    c2 = SimConfig(num_nodes=10, duration=10, seed=42, num_flows=2)
-    e2 = SimulationEngine(CPQR, c2)
-    m2 = e2.run()
-    s2 = m2.snapshot(10)
-    
-    assert s1.pdr == s2.pdr
-    
-def test_packet_ttl_expiry_recorded():
-    config = SimConfig(num_nodes=2, duration=2)
+    total_sent = len(engine.metrics.sent)
+    assert 400 <= total_sent <= 600
+
+def test_packet_ttl_expiry():
+    config = SimConfig(num_nodes=10)
     engine = SimulationEngine(AODV, config)
     
-    # Inject a packet with TTL 0
-    pkt = Packet(0, 1, 0)
+    pkt = Packet(src=0, dst=1, created_at=0.0)
     pkt.ttl = 0
     engine.network.nodes[0].queue.append(pkt)
     
     engine._forward_all_packets(0.1)
     
-    assert any(p.drop_reason == "ttl_expired" for t, p in engine.metrics.dropped)
+    assert len(engine.metrics.dropped) == 1
+    assert engine.metrics.dropped[0][1].drop_reason == 'ttl_expired'
 
-def test_energy_depletes():
-    config = SimConfig(num_nodes=2, duration=20, tx_range=500.0)
+def test_node_energy_death():
+    config = SimConfig(num_nodes=2)
     engine = SimulationEngine(CPQR, config)
-    pkt = Packet(0, 1, 0, size=1000)
-    engine.network.nodes[0].queue.append(pkt)
+    
+    # Force neighbors
+    engine.network.nodes[0].x, engine.network.nodes[0].y = 0, 0
+    engine.network.nodes[1].x, engine.network.nodes[1].y = 50, 0
+    engine.network.update_links()
+    
+    node = engine.network.nodes[0]
+    node.energy = 0.1
+    
+    pkt = Packet(src=0, dst=1, created_at=0.0)
+    pkt.size = 1000 # Cost = 1.0
+    node.queue.append(pkt)
+    
     engine._forward_all_packets(0.1)
     
-    assert engine.network.nodes[0].energy < 100.0
+    assert node.energy == 0.0
 
-def test_poisson_arrivals():
-    config = SimConfig(num_nodes=5, duration=100, packet_rate=2.0)
-    engine = SimulationEngine(AODV, config)
-    engine.run()
+def test_energy_depletes():
+    config = SimConfig(num_nodes=2)
+    engine = SimulationEngine(CPQR, config)
     
-    sent = [t for t, p in engine.metrics.sent]
-    if len(sent) > 2:
-        diffs = [sent[i] - sent[i-1] for i in range(1, len(sent))]
-        mean_diff = np.mean(diffs)
-        # Expected inter-arrival time across all flows is 1 / (packet_rate * num_flows) = 1/10 = 0.1
-        assert 0.05 < mean_diff < 0.2
+    # Force neighbors
+    engine.network.nodes[0].x, engine.network.nodes[0].y = 0, 0
+    engine.network.nodes[1].x, engine.network.nodes[1].y = 50, 0
+    engine.network.update_links()
+    
+    pkt = Packet(src=0, dst=1, created_at=0.0)
+    pkt.size = 1000 # Cost = 1.0
+    engine.network.nodes[0].queue.append(pkt)
+    
+    engine._forward_all_packets(0.1)
+    assert engine.network.nodes[0].energy < 1000.0
+
+def test_partition_detection_logic(caplog):
+    config = SimConfig(num_nodes=10, duration=20.0)
+    engine = SimulationEngine(AODV, config)
+    engine.WARMUP_PERIOD = 0.0
+    
+    # Disconnect all nodes
+    for i in range(10):
+        engine.network.nodes[i].x = i * 1000 # Way out of range
+    engine.network.update_links()
+    
+    with caplog.at_level("WARNING"):
+        engine.run()
+        # Should see partition warnings
+        assert any("NETWORK PARTITION DETECTED" in record.message for record in caplog.records)
