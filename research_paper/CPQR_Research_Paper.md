@@ -1,4 +1,4 @@
-# Towards Self-Optimizing Wireless Mesh Networks: A Detailed Research Analysis of Reinforcement Learning in Routing
+# Self-Optimizing Wireless Mesh Networks: A Detailed Research Analysis of Reinforcement Learning in Routing
 
 **Author:** Yash Sanikop  
 **Organization:** ByteLounge Research  
