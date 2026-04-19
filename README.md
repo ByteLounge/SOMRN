@@ -1,4 +1,4 @@
-# Towards Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach
+# Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -125,10 +125,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🎓 Citation
 If you use this simulator or the CPQR protocol in your research, please cite:
 ```bibtex
-@article{konur2026cpqr,
-  title={Towards Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach},
-  author={Konur, FYP},
+@article{sanikop2026cpqr,
+  title={Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach},
+  author={Yash Sanikop},
   year={2026},
+  url={https://github.com/ByteLounge/SOMRN},
   publisher={Open Source Simulation}
 }
 ```
