@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+env/
+.env
+results/*.csv
+results/*.mp4
+results/*.png
+results/*.pdf
+results/*.tex
+!results/.gitkeep
