@@ -1,0 +1,6 @@
+[run]
+omit =
+    main.py
+    sanity.py
+    visualization/*
+    experiments/*

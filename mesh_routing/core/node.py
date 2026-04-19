@@ -1,7 +1,10 @@
 from typing import List, Dict, Optional
 import math
+import logging
 from core.packet import Packet
 from config import SimConfig
+
+logger = logging.getLogger("mesh_routing.core.node")
 
 class Node:
     """Represents a node in the wireless mesh network."""
@@ -22,7 +25,8 @@ class Node:
         self.queue: List[Packet] = []
         self.queue_history: List[float] = []  # rolling window of 20 queue depth observations
         self.rssi_to: Dict[int, float] = {}   # current RSSI to each neighbor
-        self.energy: float = 100.0            # Starts full, depletes per packet forwarded
+        self.energy: float = 1000.0           # Increased from 100.0 to 1000.0 for longer life
+        self.dead_logged: bool = False
 
     def distance_to(self, other: 'Node') -> float:
         """Calculate Euclidean distance to another node."""
@@ -45,10 +49,16 @@ class Node:
             
         return ewma
 
-    def energy_cost_to_forward(self) -> float:
+    def energy_cost_to_forward(self, packet_size: int) -> float:
         """Calculate energy cost to forward a single packet."""
-        # Simple energy model: flat cost per transmission based on tx_power
-        # In a real model this would depend on actual distance or dynamic power control
-        base_cost = 0.01 
-        tx_cost = (10 ** (self.config.tx_power_dbm / 10.0)) * 0.0001
-        return base_cost + tx_cost
+        return packet_size / 1000.0
+        
+    def consume_energy(self, amount: float) -> bool:
+        """Consumes energy. Returns True if alive, False if dead."""
+        if self.energy <= 0:
+            return False
+        self.energy = max(0.0, self.energy - amount)
+        if self.energy == 0.0 and not self.dead_logged:
+            logger.warning(f"Node {self.id} has reached 0 energy (battery death).")
+            self.dead_logged = True
+        return self.energy > 0

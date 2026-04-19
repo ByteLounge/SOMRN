@@ -25,6 +25,8 @@ class SimConfig:
     beta: float = 0.3  # congestion penalty weight
     lambda_ewma: float = 0.7  # queue EWMA smoothing factor
     snapshot_interval: float = 10.0
+    max_queue_capacity: int = 50
+    log_level: str = "INFO"
 
 
 class ScenarioPresets:

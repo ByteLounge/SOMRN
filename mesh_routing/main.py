@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 import os
+import logging
 from config import SimConfig, ScenarioPresets
 from simulation.engine import SimulationEngine
 from protocols.aodv import AODV
@@ -11,6 +12,10 @@ from protocols.cpqr import CPQR
 from visualization.dashboard import run_dashboard, update_state
 from visualization.animator import TopologyAnimator
 from core.mobility import RandomWaypointMobility, GaussMarkovMobility
+
+def setup_logging(level_name: str):
+    numeric_level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.basicConfig(level=numeric_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 def main():
     parser = argparse.ArgumentParser(description="Wireless Mesh Network Simulator")
@@ -24,16 +29,14 @@ def main():
     parser.add_argument("--save-video", action="store_true", help="Save animation to results/animation.mp4")
     parser.add_argument("--mobility", choices=['rwp', 'gauss'], default='rwp')
     parser.add_argument("--scenario", choices=['default', 'static', 'mobile', 'stress'], default='default')
+    parser.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='WARNING')
     
     args = parser.parse_args()
+    setup_logging(args.log_level)
     
-    # 1. Load configuration
-    if args.scenario == 'static':
-        config = ScenarioPresets.static_low_load()
-    elif args.scenario == 'mobile':
-        config = ScenarioPresets.mobile_high_load()
-    elif args.scenario == 'stress':
-        config = ScenarioPresets.stress_test()
+    if args.scenario == 'static': config = ScenarioPresets.static_low_load()
+    elif args.scenario == 'mobile': config = ScenarioPresets.mobile_high_load()
+    elif args.scenario == 'stress': config = ScenarioPresets.stress_test()
     else:
         config = SimConfig(
             num_nodes=args.nodes,
@@ -49,28 +52,30 @@ def main():
     protocol_class = protocol_map[args.protocol]
     mobility_class = mobility_map[args.mobility]
     
-    # 2. Setup Engine
     engine = SimulationEngine(protocol_class, config, mobility_class)
     
-    # 3. Handle Live Dashboard
     if args.live:
         print("Starting live dashboard at http://localhost:8050")
         dash_thread = threading.Thread(target=run_dashboard, kwargs={'port': 8050}, daemon=True)
         dash_thread.start()
         
-        # Register callback to push state to dashboard
+        # BUG 1 Fix: Pass protocol instance correctly and snapshots
         def on_snapshot(t, snapshot):
-            update_state(engine.network, engine.metrics, t, engine.protocol.name)
+            update_state(
+                engine.network, 
+                engine.protocol, 
+                [vars(s) for s in engine.metrics.snapshots], 
+                t, 
+                engine.protocol.name
+            )
         
         engine.on_snapshot_cb = on_snapshot
 
-    # 4. Run Simulation
     print(f"Running simulation: {args.protocol.upper()} | Nodes: {config.num_nodes} | Speed: {config.max_speed}m/s")
     start_time = time.time()
     metrics = engine.run()
     end_time = time.time()
     
-    # 5. Final Report
     report = metrics.full_report()
     print("\n" + "="*30)
     print("SIMULATION COMPLETE")
@@ -80,18 +85,14 @@ def main():
         print(f"{k.replace('_', ' ').title():<20}: {v:.4f}" if isinstance(v, float) else f"{k.replace('_', ' ').title():<20}: {v}")
     print("="*30 + "\n")
     
-    # 6. Save results
     os.makedirs("results", exist_ok=True)
     csv_path = f"results/{args.protocol}_{args.speed}_{args.seed}.csv"
     metrics.save_csv(csv_path)
     print(f"Metrics saved to {csv_path}")
     
-    # 7. Animation
     if args.save_video:
         print("Generating animation...")
         animator = TopologyAnimator(engine)
-        # Note: animator needs a fresh engine or we reset the time
-        # For simplicity, we just save what we have or run a shorter one
         animator.animate(duration=min(20, args.duration))
         animator.save_video("results/animation.mp4")
 

@@ -1,5 +1,7 @@
 import numpy as np
-from typing import List, Dict, Type, Callable, Optional
+import logging
+import networkx as nx
+from typing import List, Dict, Type, Callable, Optional, Set
 from core.node import Node
 from core.network import WirelessNetwork
 from core.packet import Packet
@@ -7,6 +9,8 @@ from core.mobility import RandomWaypointMobility, GaussMarkovMobility
 from protocols.base import BaseProtocol
 from metrics.collector import MetricsCollector
 from config import SimConfig
+
+logger = logging.getLogger("mesh_routing.simulation.engine")
 
 class SimulationEngine:
     """Core simulation engine that orchestrates the network, mobility, and protocols."""
@@ -33,7 +37,8 @@ class SimulationEngine:
         self.protocol = protocol_class(self.network, config)
         
         # Initialize metrics
-        self.metrics = MetricsCollector()
+        self.metrics = MetricsCollector(config.num_nodes)
+        self.metrics.net = self.network # For energy calculation in snapshots
         
         # Traffic flows: (src, dst)
         self.flows = []
@@ -42,7 +47,17 @@ class SimulationEngine:
             src, dst = self.rng.choice(node_ids, 2, replace=False)
             self.flows.append((int(src), int(dst)))
             
+        # Next packet generation times per flow
+        self.next_packet_times = [self.rng.exponential(1.0 / config.packet_rate) for _ in range(config.num_flows)]
+        
         self.on_snapshot_cb: Optional[Callable] = None
+        self.packet_positions = [] # For dashboard animation
+        
+        # BUG 2 State tracking
+        self._in_partition: bool = False
+        self._dead_nodes: set = set()
+        self.WARMUP_PERIOD: float = 10.0
+        self.time = 0.0
 
     def run(self) -> MetricsCollector:
         """Runs the simulation for the configured duration."""
@@ -50,15 +65,23 @@ class SimulationEngine:
         
         for step in range(n_steps):
             t = step * self.config.time_step
+            self.time = t
             self.network.time = t
+            self.packet_positions = [] # Reset animations
             
             # 1. Mobility step
             self.mobility.step(self.config.time_step)
             
             # 2. Network update
-            old_edges = set(self.network.graph.edges())
+            old_edges = set()
+            for u, v in self.network.graph.edges():
+                old_edges.add(tuple(sorted((u, v))))
+                
             self.network.update_links()
-            new_edges = set(self.network.graph.edges())
+            
+            new_edges = set()
+            for u, v in self.network.graph.edges():
+                new_edges.add(tuple(sorted((u, v))))
             
             # 3. Detect topology changes
             changed_edges = []
@@ -77,22 +100,57 @@ class SimulationEngine:
             self.protocol.control_bytes_sent = 0 # Reset for current step counting
             
             # 5. Traffic generation (Poisson arrival)
-            for src, dst in self.flows:
-                if self.rng.random() < self.config.packet_rate * self.config.time_step:
-                    pkt = Packet(src=src, dst=dst, created_at=t, size=self.config.packet_size)
+            for i, (src, dst) in enumerate(self.flows):
+                while t >= self.next_packet_times[i]:
+                    pkt = Packet(src=src, dst=dst, created_at=self.next_packet_times[i], size=self.config.packet_size)
+                    pkt.queued_at = self.next_packet_times[i]
                     self.network.nodes[src].queue.append(pkt)
-                    self.metrics.on_send(pkt, t)
+                    self.metrics.on_send(pkt, self.next_packet_times[i], flow_id=i)
+                    self.next_packet_times[i] += self.rng.exponential(1.0 / self.config.packet_rate)
+            
+            # 6. BUG 2: Partition Detection Fix
+            if self.time >= self.WARMUP_PERIOD:
+                alive_flows = [
+                    (s, d) for s, d in self.flows
+                    if self.network.nodes[s].energy > 0
+                    and self.network.nodes[d].energy > 0
+                ]
+                if alive_flows:
+                    reachable_count = sum(
+                        1 for s, d in alive_flows
+                        if nx.has_path(self.network.graph, s, d)
+                    )
+                    ratio = reachable_count / len(alive_flows)
+                    now_partitioned = ratio < 0.5
+                    if now_partitioned and not self._in_partition:
+                        logger.warning(
+                            f"NETWORK PARTITION DETECTED at time "
+                            f"{self.time:.1f}s "
+                            f"({reachable_count}/{len(alive_flows)} "
+                            f"flows reachable)"
+                        )
+                        self._in_partition = True
+                    elif not now_partitioned and self._in_partition:
+                        logger.info(
+                            f"NETWORK PARTITION RESOLVED at time "
+                            f"{self.time:.1f}s"
+                        )
+                        self._in_partition = False
                     
-            # 6. Packet forwarding
+            # 7. Packet forwarding
             self._forward_all_packets(t)
             
-            # 7. Node state updates
+            # 8. Node state updates
             for node in self.network.nodes.values():
                 node.update_queue_history()
                 
-            # 8. Snapshots
-            if step % int(self.config.snapshot_interval / self.config.time_step) == 0:
+            # 9. Snapshots
+            if step % max(1, int(self.config.snapshot_interval / self.config.time_step)) == 0:
                 snap = self.metrics.snapshot(t, window=self.config.snapshot_interval)
+                snap.protocol_name = self.protocol.name
+                snap.config_seed = self.config.seed
+                snap.num_nodes = self.config.num_nodes
+                snap.max_speed = self.config.max_speed
                 if self.on_snapshot_cb:
                     self.on_snapshot_cb(t, snap)
                     
@@ -100,28 +158,52 @@ class SimulationEngine:
 
     def _forward_all_packets(self, t: float):
         """Simulates packet transmission across the network."""
-        # We'll use a copy of the nodes' queues to avoid issues during modification
+        next_step_queues = {node_id: [] for node_id in self.network.nodes}
+        active_nodes_this_step = set()
+        
         for node_id, node in self.network.nodes.items():
             if not node.queue:
                 continue
                 
-            # In a single time step, a node can process a limited number of packets
-            # based on bandwidth. For simplicity, we process a reasonable amount.
+            if node.energy <= 0:
+                # BUG 2: Energy death logging Fix
+                if node.id not in self._dead_nodes:
+                    logger.warning(
+                        f"Node {node.id} battery dead at t={self.time:.1f}s"
+                    )
+                    self._dead_nodes.add(node.id)
+                
+                # Node is dead, packets are lost
+                for pkt in node.queue:
+                    self.metrics.on_drop(pkt, t, "Node Dead")
+                    if hasattr(self.protocol, 'on_packet_dropped'):
+                        self.protocol.on_packet_dropped(pkt)
+                node.queue = []
+                continue
+
             packets_to_process = node.queue[:]
             node.queue = []
             
             for pkt in packets_to_process:
+                # Route discovery timeout drop
+                if pkt.queued_at and (t - pkt.queued_at) > 5.0:
+                    pkt.drop_reason = 'route_discovery_timeout'
+                    self.metrics.on_drop(pkt, t, reason='route_discovery_timeout')
+                    if hasattr(self.protocol, 'on_packet_dropped'):
+                        self.protocol.on_packet_dropped(pkt)
+                    continue
+
                 if pkt.dst == node_id:
-                    # Packet delivered!
-                    pkt.delivered = True
-                    pkt.delivered_at = t
-                    self.metrics.on_deliver(pkt, t)
+                    # BUG 3 Fix A: on_packet_delivered
+                    self.metrics.on_deliver(pkt, t, flow_id=getattr(pkt, 'flow_id', -1))
                     if hasattr(self.protocol, 'on_packet_delivered'):
-                        self.protocol.on_packet_delivered(pkt)
+                        self.protocol.on_packet_delivered(pkt, t)
                     continue
                     
                 if pkt.ttl <= 0:
-                    self.metrics.on_drop(pkt, t, "TTL Expired")
+                    # BUG 3 Fix A: on_packet_dropped for TTL
+                    pkt.drop_reason = 'ttl_expired'
+                    self.metrics.on_drop(pkt, t, reason='ttl_expired')
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
                     continue
@@ -133,15 +215,21 @@ class SimulationEngine:
                     pkt.hop_count += 1
                     pkt.ttl -= 1
                     pkt.route.append(node_id)
-                    self.network.nodes[next_hop].queue.append(pkt)
-                    # Energy depletion
-                    node.energy -= node.energy_cost_to_forward()
-                    self.metrics.energy_consumed += node.energy_cost_to_forward()
+                    pkt.queued_at = t # reset queue time
+                    next_step_queues[next_hop].append(pkt)
+                    
+                    active_nodes_this_step.add(node_id)
+                    
+                    energy_cost = node.energy_cost_to_forward(pkt.size)
+                    node.consume_energy(energy_cost)
+                    self.metrics.energy_consumed += energy_cost
+                    
+                    self.packet_positions.append({'source': node_id, 'target': next_hop})
                 else:
                     # No route or link break
                     if next_hop == -1:
                         # Re-queue for next step (limited buffer)
-                        if len(node.queue) < 100:
+                        if len(node.queue) < self.config.max_queue_capacity:
                             node.queue.append(pkt)
                         else:
                             self.metrics.on_drop(pkt, t, "Queue Overflow")
@@ -152,5 +240,21 @@ class SimulationEngine:
                         if hasattr(self.protocol, 'on_packet_dropped'):
                             self.protocol.on_packet_dropped(pkt)
 
+        # Merge staged packets back
+        for node_id, pkts in next_step_queues.items():
+            if pkts:
+                node = self.network.nodes[node_id]
+                for p in pkts:
+                    if len(node.queue) < self.config.max_queue_capacity:
+                        node.queue.append(p)
+                    else:
+                        self.metrics.on_drop(p, t, "Queue Overflow")
+                        if hasattr(self.protocol, 'on_packet_dropped'):
+                            self.protocol.on_packet_dropped(p)
+                            
+        self.metrics.record_active_nodes(active_nodes_this_step)
+
     def get_topology_for_dashboard(self) -> dict:
-        return self.network.topology_snapshot()
+        snap = self.network.topology_snapshot()
+        snap['packets'] = self.packet_positions
+        return snap
