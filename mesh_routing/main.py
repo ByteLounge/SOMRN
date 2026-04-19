@@ -9,7 +9,7 @@ from simulation.engine import SimulationEngine
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
-from visualization.dashboard import run_dashboard, update_state
+from visualization.dashboard import run_dashboard
 from visualization.animator import TopologyAnimator
 from core.mobility import RandomWaypointMobility, GaussMarkovMobility
 
@@ -34,6 +34,13 @@ def main():
     args = parser.parse_args()
     setup_logging(args.log_level)
     
+    if args.live:
+        print("Starting live dashboard at http://localhost:8050")
+        print("Use the 'START SIMULATION' button in the dashboard to begin.")
+        run_dashboard(port=8050)
+        return
+
+    # CLI / Batch Mode
     if args.scenario == 'static': config = ScenarioPresets.static_low_load()
     elif args.scenario == 'mobile': config = ScenarioPresets.mobile_high_load()
     elif args.scenario == 'stress': config = ScenarioPresets.stress_test()
@@ -53,23 +60,6 @@ def main():
     mobility_class = mobility_map[args.mobility]
     
     engine = SimulationEngine(protocol_class, config, mobility_class)
-    
-    if args.live:
-        print("Starting live dashboard at http://localhost:8050")
-        dash_thread = threading.Thread(target=run_dashboard, kwargs={'port': 8050}, daemon=True)
-        dash_thread.start()
-        
-        # BUG 1 Fix: Pass protocol instance correctly and snapshots
-        def on_snapshot(t, snapshot):
-            update_state(
-                engine.network, 
-                engine.protocol, 
-                [vars(s) for s in engine.metrics.snapshots], 
-                t, 
-                engine.protocol.name
-            )
-        
-        engine.on_snapshot_cb = on_snapshot
 
     print(f"Running simulation: {args.protocol.upper()} | Nodes: {config.num_nodes} | Speed: {config.max_speed}m/s")
     start_time = time.time()
@@ -95,13 +85,6 @@ def main():
         animator = TopologyAnimator(engine)
         animator.animate(duration=min(20, args.duration))
         animator.save_video("results/animation.mp4")
-
-    if args.live:
-        print("Simulation finished. Dashboard still running. Press Ctrl+C to exit.")
-        try:
-            while True: time.sleep(1)
-        except KeyboardInterrupt:
-            print("Exiting...")
 
 if __name__ == "__main__":
     main()
