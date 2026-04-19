@@ -118,6 +118,9 @@ The project maintains a rigorous testing standard. Run the full suite using:
 cd mesh_routing
 python -m pytest tests/ -v
 ```
+## Dashboard
+
+<img width="1913" height="870" alt="Screenshot 2026-04-19 214744" src="https://github.com/user-attachments/assets/b07c55e4-e260-4f5a-94f1-9ab58388cd79" />
 
 ## 📜 License
 This project is licensed under the MIT License - see the LICENSE file for details.
