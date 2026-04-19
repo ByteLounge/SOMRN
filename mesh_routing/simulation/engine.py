@@ -1,6 +1,7 @@
 import numpy as np
 import logging
 import networkx as nx
+import time
 from typing import List, Dict, Type, Callable, Optional, Set
 from core.node import Node
 from core.network import WirelessNetwork
@@ -51,6 +52,7 @@ class SimulationEngine:
         self.next_packet_times = [self.rng.exponential(1.0 / config.packet_rate) for _ in range(config.num_flows)]
         
         self.on_snapshot_cb: Optional[Callable] = None
+        self.on_step_cb: Optional[Callable] = None
         self.packet_positions = [] # For dashboard animation
         
         # BUG 2 State tracking
@@ -59,7 +61,7 @@ class SimulationEngine:
         self.WARMUP_PERIOD: float = 10.0
         self.time = 0.0
 
-    def run(self) -> MetricsCollector:
+    def run(self, real_time: bool = False) -> MetricsCollector:
         """Runs the simulation for the configured duration."""
         n_steps = int(self.config.duration / self.config.time_step)
         
@@ -144,7 +146,7 @@ class SimulationEngine:
             for node in self.network.nodes.values():
                 node.update_queue_history()
                 
-            # 9. Snapshots
+            # 9. Snapshots and Callbacks
             if step % max(1, int(self.config.snapshot_interval / self.config.time_step)) == 0:
                 snap = self.metrics.snapshot(t, window=self.config.snapshot_interval)
                 snap.protocol_name = self.protocol.name
@@ -153,7 +155,13 @@ class SimulationEngine:
                 snap.max_speed = self.config.max_speed
                 if self.on_snapshot_cb:
                     self.on_snapshot_cb(t, snap)
-                    
+            
+            if self.on_step_cb:
+                self.on_step_cb(t)
+                
+            if real_time:
+                time.sleep(self.config.time_step * 0.1) # Throttle for real-time visualization
+
         return self.metrics
 
     def _forward_all_packets(self, t: float):

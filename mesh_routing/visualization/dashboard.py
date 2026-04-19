@@ -30,15 +30,19 @@ class DashboardState:
 
 state = DashboardState()
 
-def update_state(network, protocol, metrics_history, t, protocol_name):
+def update_topology(engine):
+    """Updates only the topology state for smooth animation."""
     with state.lock:
-        snap = network.topology_snapshot()
-        state.topology = snap
-        state.metrics_history = metrics_history
-        state.current_time = t
-        state.protocol_name = protocol_name
-        if protocol and hasattr(protocol, 'get_qtable_stats'):
-             state.q_stats = protocol.get_qtable_stats()
+        state.topology = engine.get_topology_for_dashboard()
+        state.current_time = engine.time
+        if engine.protocol and hasattr(engine.protocol, 'get_qtable_stats'):
+             state.q_stats = engine.protocol.get_qtable_stats()
+
+def update_metrics(engine):
+    """Updates the metrics history on snapshot intervals."""
+    with state.lock:
+        state.metrics_history = [vars(s) for s in engine.metrics.snapshots]
+        state.protocol_name = engine.protocol.name
 
 app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
 
@@ -124,7 +128,7 @@ app.layout = html.Div([
             ], className="four columns")
         ], className="row"),
         
-        dcc.Interval(id='interval-component', interval=1000, n_intervals=0)
+        dcc.Interval(id='interval-component', interval=500, n_intervals=0) # Faster interval for UI response
     ], style=CONTENT_STYLE)
 ])
 
@@ -137,17 +141,12 @@ def run_simulation(protocol_name, n_nodes, speed, load, duration):
         max_speed=speed,
         packet_rate=load,
         duration=duration,
-        seed=42 # Fixed seed for dashboard reproducibility
+        seed=42
     )
     
     engine = SimulationEngine(protocol_map[protocol_name], config, RandomWaypointMobility)
-    engine.on_snapshot_cb = lambda t, snap: update_state(
-        engine.network, 
-        engine.protocol, 
-        [vars(s) for s in engine.metrics.snapshots], 
-        t, 
-        engine.protocol.name
-    )
+    engine.on_snapshot_cb = lambda t, snap: update_metrics(engine)
+    engine.on_step_cb = lambda t: update_topology(engine)
     
     with state.lock:
         state.finished = False
@@ -156,7 +155,7 @@ def run_simulation(protocol_name, n_nodes, speed, load, duration):
         state.current_time = 0.0
         state.config = config
         
-    engine.run()
+    engine.run(real_time=True)
     with state.lock: state.finished = True
 
 @app.callback(
@@ -172,7 +171,7 @@ def run_simulation(protocol_name, n_nodes, speed, load, duration):
 def restart_sim(n_clicks, protocol, nodes, speed, load, duration):
     global current_sim_thread
     if current_sim_thread and current_sim_thread.is_alive():
-        return "Wait for current simulation to finish or reload page."
+        return "Simulation in progress..."
     
     current_sim_thread = threading.Thread(
         target=run_simulation, 
@@ -193,25 +192,23 @@ def restart_sim(n_clicks, protocol, nodes, speed, load, duration):
 )
 def update_charts(n):
     with state.lock:
-        # 1. Topology with Cisco-like Markers
         nodes = state.topology.get('nodes', [])
+        if not nodes:
+            return [dash.no_update]*6
+            
         edge_traces = []
-        
-        # Draw links with quality-based color
         for edge in state.topology.get('edges', []):
             src = next((n for n in nodes if n['id'] == edge['source']), None)
             tgt = next((n for n in nodes if n['id'] == edge['target']), None)
             if not src or not tgt: continue
             q = edge['quality']
-            # Cisco green/amber/red status links
             color = "#28a745" if q > 0.8 else "#ffc107" if q > 0.4 else "#dc3545"
             edge_traces.append(go.Scatter(
                 x=[src['x'], tgt['x'], None], y=[src['y'], tgt['y'], None],
                 line=dict(width=1, color=color),
-                hoverinfo='none', mode='lines', opacity=0.4
+                hoverinfo='none', mode='lines', opacity=0.3
             ))
         
-        # Packet animations
         packet_x, packet_y = [], []
         for pkt in state.topology.get('packets', []):
             src = next((n for n in nodes if n['id'] == pkt['source']), None)
@@ -225,12 +222,11 @@ def update_charts(n):
             mode='markers+text',
             text=[str(n['id']) for n in nodes],
             textposition="bottom center",
-            hovertext=[f"Node {n['id']}<br>Energy: {n['energy']:.1f}%" for n in nodes],
+            hovertext=[f"Node {n['id']}<br>Energy: {n['energy']:.1f}" for n in nodes],
             marker=dict(
-                size=18,
-                symbol='circle',
-                color=CISCO_BLUE,
-                line=dict(width=2, color="white")
+                size=15,
+                color=[CISCO_BLUE if n['energy'] > 0 else "#666" for n in nodes],
+                line=dict(width=1, color="white")
             )
         )
         
@@ -238,7 +234,6 @@ def update_charts(n):
             x=packet_x, y=packet_y, 
             mode='markers', 
             marker=dict(size=6, color='black', symbol='square'),
-            name='Packets'
         )
         
         area_size = state.config.area_size
@@ -247,13 +242,13 @@ def update_charts(n):
             layout=go.Layout(
                 showlegend=False, 
                 margin=dict(b=0,l=0,r=0,t=0),
-                xaxis=dict(range=[0, area_size], showgrid=True, gridcolor=GRID_COLOR, zeroline=False, dtick=50),
-                yaxis=dict(range=[0, area_size], showgrid=True, gridcolor=GRID_COLOR, zeroline=False, dtick=50),
-                plot_bgcolor='white'
+                xaxis=dict(range=[0, area_size], showgrid=True, gridcolor=GRID_COLOR, zeroline=False),
+                yaxis=dict(range=[0, area_size], showgrid=True, gridcolor=GRID_COLOR, zeroline=False),
+                plot_bgcolor='white',
+                uirevision='constant' # Keeps zoom level on update
             )
         )
 
-        # 2. Metrics History
         history = state.metrics_history
         times = [m['time'] for m in history]
         
@@ -265,7 +260,7 @@ def update_charts(n):
         tput_fig.add_trace(go.Scatter(x=times, y=[m['throughput_bps']/1000 for m in history], fill='tozeroy', name='kbps', line=dict(color="#28a745")))
         tput_fig.update_layout(title="Throughput (kbps)", margin=dict(t=30, b=30))
         
-        q_info = f"Avg Q: {state.q_stats['mean']:.2f} | Convergence: {state.q_stats['min']:.2f}-{state.q_stats['max']:.2f}"
+        q_info = f"Avg Q: {state.q_stats['mean']:.2f} | Range: {state.q_stats['min']:.2f}-{state.q_stats['max']:.2f}"
         status = html.Span("● LIVE", style={'color': '#28a745'}) if not state.finished and times else html.Span("■ IDLE", style={'color': '#666'})
         if state.finished: status = html.Span("✓ COMPLETE", style={'color': CISCO_BLUE})
         

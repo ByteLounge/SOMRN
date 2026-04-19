@@ -102,7 +102,7 @@ class WirelessNetwork:
     def topology_snapshot(self) -> Dict:
         """Returns a serializable snapshot of the current topology for the dashboard."""
         snapshot = {
-            'nodes': [{'id': n.id, 'x': n.x, 'y': n.y} for n in self.nodes.values()],
+            'nodes': [{'id': n.id, 'x': n.x, 'y': n.y, 'energy': n.energy} for n in self.nodes.values()],
             'edges': []
         }
         for u, v in self.graph.edges():
