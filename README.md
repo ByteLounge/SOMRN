@@ -1,114 +1,134 @@
 # Towards Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach
 
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Test Status](https://img.shields.io/badge/tests-passing-brightgreen)
+![Test Status](https://img.shields.io/badge/tests-36%20passing-brightgreen)
+![UI](https://img.shields.io/badge/UI-Cisco%20Packet%20Tracer%20Style-orange)
 
-This project is a high-fidelity wireless mesh network simulator designed to evaluate routing protocols in dynamic, mobile environments. It features a novel Reinforcement Learning protocol, **Congestion-Predictive Q-Routing (CPQR)**, compared against classical baselines (AODV and OLSR).
+## 🌐 Overview
 
-## Architecture
+This project is a high-fidelity Wireless Mesh Network (WMN) simulator developed to research and evaluate autonomous routing protocols in dynamic, mobile environments. The centerpiece is a novel Reinforcement Learning (RL) protocol: **Congestion-Predictive Q-Routing (CPQR)**.
 
-```text
-+-------------------+       +-------------------+       +-------------------+
-|    Simulation     |       |      Metrics      |       |   Visualization   |
-|      Engine       |<----->|     Collector     |------>|     Dashboard     |
-+-------------------+       +-------------------+       +-------------------+
-        |  |                          |                           |
-        |  |                          |                           |
-        v  v                          v                           v
-+-------------------+       +-------------------+       +-------------------+
-|      Core         |       |    Protocols      |       |    Experiments    |
-| (Node, Link, Net) |<----->| (AODV, OLSR, CPQR)|       |  (Batch, Plots)   |
-+-------------------+       +-------------------+       +-------------------+
+The simulator provides a comprehensive framework for comparing CPQR against industry-standard protocols (**AODV** and **OLSR**) across metrics like Packet Delivery Ratio (PDR), Latency, Throughput, and Energy Efficiency.
+
+## 🚀 Key Features
+
+- **RL-Based Routing (CPQR):** An adaptive routing agent that learns optimal paths based on real-time network feedback (delay, congestion, and link stability).
+- **Cisco-Inspired Dashboard:** A professional-grade live visualization suite that mirrors the look and feel of Cisco Packet Tracer, allowing real-time topology management and metrics tracking.
+- **Physical Layer Modeling:** Simplified path-loss models (Friis/Log-distance), RSSI tracking, and dynamic link quality estimation.
+- **Mobility Models:** Dynamic node movement using Random Waypoint and Gauss-Markov models.
+- **Batch Experimentation:** Automated tools for running hundreds of simulations across various seeds, node counts, and speeds to generate statistical results.
+
+## 🖥️ Live Dashboard (Packet Tracer Mode)
+
+The simulator includes a high-performance web dashboard built with Dash and Plotly.
+
+**Capabilities:**
+- **Dynamic Configuration:** Adjust Node Count (10-100), Speed (0-30m/s), and Traffic Load via sidebar sliders.
+- **Logic Topology View:** Real-time rendering of nodes, active links (color-coded by quality), and individual packet transmissions.
+- **Interactive Metrics:** Live-updating charts for PDR and Throughput (kbps).
+- **Q-Learning Intelligence:** Live display of RL agent convergence and Q-table ranges.
+
+**To Launch:**
+```bash
+cd mesh_routing
+python main.py --live
 ```
+Access at: `http://localhost:8050`
 
-## Protocol Comparison
+## 🧠 Technical Protocol: CPQR
 
-| Protocol | Type | Overhead | Convergence | Mobility Handling | Novelty |
-|----------|------|----------|-------------|-------------------|---------|
-| **AODV** | Reactive | Low | Slow | Moderate | Standard RFC |
-| **OLSR** | Proactive | High | Fast | Poor | MPR Selection |
-| **CPQR** | Hybrid/RL | Moderate | Fast | Excellent | Q-Learning, LLT |
+CPQR treats routing as a distributed reinforcement learning problem. Each node maintains a Q-table $Q(u, d, v)$ representing the expected "cost" (cumulative delay) to reach destination $d$ via neighbor $v$.
 
-## CPQR Mathematical Description
-
-CPQR uses a Q-learning approach to find the optimal path. The Q-value $Q(u, d, v)$ represents the estimated cost (delay) from node $u$ to destination $d$ via neighbor $v$.
-
-**Update Rule:**
-When a packet is delivered, the Q-value is updated:
+### 1. Update Rule (Bellman Equation)
+When a packet reaches its destination, the feedback is propagated back (or calculated locally based on in-flight tracking) to update the source node's intelligence:
 $$Q(u, d, v) \leftarrow (1 - \alpha) Q(u, d, v) + \alpha \left[ R + \gamma \min_{v'} Q(v, d, v') \right]$$
 
-**Reward Function:**
-The reward $R$ penalizes delay, congestion, and energy consumption:
-$$R = \text{delay} + \beta \times CP + W_e \times \text{energy\_cost}$$
+### 2. Multi-Objective Reward Function
+The reward $R$ is designed to minimize latency while preserving network health:
+$$R = \text{delay} + \beta \times \text{CongestionPenalty} + W_e \times \text{EnergyCost}$$
+- **CongestionPenalty:** Calculated using an EWMA of the neighbor's queue depth.
+- **EnergyCost:** Penalizes nodes with low battery to prevent route partitions.
 
-**Congestion Penalty (CP):**
-Normalized EWMA of queue depth:
-$$CP = \frac{\text{EWMA}(Queue)}{Max\_Queue\_Capacity}$$
+### 3. Mobility Resilience
+CPQR utilizes **Predicted Link Lifetime (LLT)**. If a link is predicted to break within a certain threshold (based on declining RSSI trends), the agent automatically begins exploring alternative "safer" neighbors.
 
-## Installation
+## 📁 Project Structure
 
-1. Create a virtual environment:
+```text
+FYP/
+├── README.md               # Detailed documentation
+└── mesh_routing/           # Root of the application
+    ├── main.py             # Entry point (Live or CLI mode)
+    ├── config.py           # Simulation parameters & presets
+    ├── core/               # Physical & Network layer logic
+    │   ├── network.py      # Topology and link management
+    │   ├── node.py         # Energy, queues, and positioning
+    │   └── packet.py       # Data structure for network traffic
+    ├── protocols/          # Routing implementations
+    │   ├── cpqr.py         # RL-based protocol (Novel)
+    │   ├── aodv.py         # Reactive baseline
+    │   └── olsr.py         # Proactive baseline
+    ├── simulation/         # Core execution engine
+    │   └── engine.py       # Orchestrates mobility and packet flow
+    ├── visualization/      # UI components
+    │   └── dashboard.py    # Cisco-style live dashboard
+    └── tests/              # Comprehensive test suite
+```
+
+## 🛠️ Installation
+
+1. **Clone & Environment:**
    ```bash
+   git clone <repo-url>
+   cd FYP
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate  # Windows: venv\Scripts\activate
    ```
-2. Install dependencies:
+2. **Dependencies:**
    ```bash
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
+   pip install -r mesh_routing/requirements.txt
    ```
 
-## Usage
+## 📊 Usage Guide
 
-### Run a single simulation
+### Scenario 1: Live Interactive Research
+Launch the dashboard to manually stress-test protocols:
 ```bash
-make run
-```
-Or manually:
-```bash
-python main.py --protocol cpqr --nodes 30 --speed 5.0 --live
+python mesh_routing/main.py --live
 ```
 
-### Run batch experiments
+### Scenario 2: Headless Comparison (CLI)
+Run a specific configuration and get a summary report:
 ```bash
-make batch
+python mesh_routing/main.py --protocol cpqr --nodes 50 --speed 15.0 --duration 600
 ```
 
-### Generate plots
+### Scenario 3: Batch Analysis
+Run the automated experiment pipeline:
 ```bash
-make plots
+python mesh_routing/experiments/run_batch.py
+python mesh_routing/experiments/plot_results.py
 ```
 
-### Run tests
+## ✅ Quality Assurance
+
+The project maintains a rigorous testing standard. Run the full suite using:
 ```bash
-make test
+cd mesh_routing
+python -m pytest tests/ -v
 ```
 
-## Reproducing Figures
+## 📜 License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-1. Run the batch experiments: `make batch` (This will generate `results/all_results.csv`)
-2. Generate the plots: `make plots` (This will create all PDFs and PNGs in the `results/` directory)
-3. Check the `results/summary_table.tex` for the LaTeX table.
-
-## Known Limitations
-- The simulation runs in discrete time steps, which can cause slight inaccuracies compared to continuous-time simulators like ns-3.
-- The MAC layer is simplified (no CSMA/CA backoff simulation).
-
-## Future Work
-- Implement a continuous-time event-driven engine.
-- Integrate realistic MAC layer models (e.g., 802.11).
-- Add support for multiple Q-learning agents communicating directly.
-
-## Citation
-
-If you use this code in your research, please cite:
+## 🎓 Citation
+If you use this simulator or the CPQR protocol in your research, please cite:
 ```bibtex
-@misc{cpqr2026,
-  author = {Your Name},
-  title = {Towards Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach},
-  year = {2026},
-  publisher = {GitHub},
-  journal = {GitHub repository}
+@article{konur2026cpqr,
+  title={Towards Self-Optimizing Wireless Mesh Networks: A Reinforcement Learning Approach},
+  author={Konur, FYP},
+  year={2026},
+  publisher={Open Source Simulation}
 }
 ```
