@@ -69,7 +69,17 @@ CONTENT_STYLE = {
 app.layout = html.Div([
     # Sidebar
     html.Div([
-        html.Img(src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Cisco_logo_blue_2016.svg/100px-Cisco_logo_blue_2016.svg.png", style={'marginBottom': '20px', 'width': '80px'}),
+        # Reliable CSS-based Cisco-style Logo
+        html.Div([
+            html.Div([
+                html.Div(style={'width': '4px', 'height': '15px', 'backgroundColor': CISCO_BLUE, 'display': 'inline-block', 'margin': '1px'}),
+                html.Div(style={'width': '4px', 'height': '25px', 'backgroundColor': CISCO_BLUE, 'display': 'inline-block', 'margin': '1px'}),
+                html.Div(style={'width': '4px', 'height': '35px', 'backgroundColor': CISCO_BLUE, 'display': 'inline-block', 'margin': '1px'}),
+                html.Div(style={'width': '4px', 'height': '25px', 'backgroundColor': CISCO_BLUE, 'display': 'inline-block', 'margin': '1px'}),
+                html.Div(style={'width': '4px', 'height': '15px', 'backgroundColor': CISCO_BLUE, 'display': 'inline-block', 'margin': '1px'}),
+            ], style={'textAlign': 'center', 'marginBottom': '-10px'}),
+            html.H3("CISCO", style={'color': CISCO_BLUE, 'fontWeight': '900', 'letterSpacing': '2px', 'textAlign': 'center', 'margin': '0'})
+        ], style={'marginBottom': '30px', 'cursor': 'default'}),
         html.H4("Simulation Control", style={'color': CISCO_BLUE, 'fontWeight': 'bold'}),
         html.Hr(),
         
