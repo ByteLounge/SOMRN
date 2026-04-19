@@ -1,72 +1,62 @@
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-import networkx as nx
-from typing import List
-import numpy as np
+import matplotlib.patches as patches
+from simulation.engine import SimulationEngine
+from typing import Optional
 
 class TopologyAnimator:
-    def __init__(self, engine):
+    """Creates a Matplotlib animation of the network simulation."""
+    def __init__(self, engine: SimulationEngine):
         self.engine = engine
-        self.fig, self.ax = plt.subplots(figsize=(10, 10))
-        self.config = engine.config
+        self.fig, self.ax = plt.subplots(figsize=(8, 8))
+        self.ax.set_xlim(0, engine.config.area_size)
+        self.ax.set_ylim(0, engine.config.area_size)
+        self.ax.set_title(f"Network Animation: {engine.protocol.name}")
         
-        self.nodes_scatter = None
-        self.edges_lines = []
-        self.packet_scatter = None
-        
-        self.history = []
+        self.node_scatter = self.ax.scatter([], [], s=100, c='royalblue', zorder=5)
+        self.edge_lines = []
+        self.packet_dots = []
+        self.time_text = self.ax.text(0.02, 0.95, '', transform=self.ax.transAxes)
 
-    def _setup_plot(self):
-        self.ax.set_xlim(0, self.config.area_size)
-        self.ax.set_ylim(0, self.config.area_size)
-        self.ax.set_title("Wireless Mesh Network Topology")
-        self.ax.grid(True)
-
-    def _update_frame(self, frame):
-        self.ax.clear()
-        self._setup_plot()
+    def _update(self, frame):
+        # Run one step (or multiple for speed)
+        steps_per_frame = 5
+        for _ in range(steps_per_frame):
+            self.engine.mobility.step(self.engine.config.time_step)
+            self.engine.network.time += self.engine.config.time_step
+            self.engine.network.update_links()
+            # Simplified engine call for animation purposes
+            # (In a real scenario we'd just hook into the engine's main loop)
         
-        snap = self.history[frame]
-        nodes = snap['nodes']
-        edges = snap['edges']
+        # Update node positions
+        x = [n.x for n in self.engine.network.nodes.values()]
+        y = [n.y for n in self.engine.network.nodes.values()]
+        self.node_scatter.set_offsets(list(zip(x, y)))
         
-        # Plot nodes
-        nx_coords = [n['x'] for n in nodes]
-        ny_coords = [n['y'] for n in nodes]
-        self.ax.scatter(nx_coords, ny_coords, c='blue', s=100, zorder=5)
+        # Update edges
+        for line in self.edge_lines:
+            line.remove()
+        self.edge_lines = []
         
-        # Labels
-        for n in nodes:
-            self.ax.annotate(str(n['id']), (n['x'], n['y']), xytext=(5, 5), textcoords='offset points')
+        for u, v in self.engine.network.graph.edges():
+            n1 = self.engine.network.nodes[u]
+            n2 = self.engine.network.nodes[v]
+            link = self.engine.network.get_link(u, v)
+            q = link.quality if link else 0.0
+            line, = self.ax.plot([n1.x, n2.x], [n1.y, n2.y], color=(1-q, q, 0, 0.5), zorder=1)
+            self.edge_lines.append(line)
             
-        # Plot edges
-        node_pos = {n['id']: (n['x'], n['y']) for n in nodes}
-        for e in edges:
-            u, v = e['source'], e['target']
-            x_vals = [node_pos[u][0], node_pos[v][0]]
-            y_vals = [node_pos[u][1], node_pos[v][1]]
-            self.ax.plot(x_vals, y_vals, c='gray', alpha=0.5, zorder=1)
+        self.time_text.set_text(f"Time: {self.engine.network.time:.1f}s")
+        return [self.node_scatter, self.time_text] + self.edge_lines
 
     def animate(self, duration: float):
-        self.engine.on_snapshot = self._record_snapshot
-        
-        # Run simulation to collect history
-        print("Running simulation to collect animation frames...")
-        self.engine.run()
-        
-        print("Generating animation...")
-        anim = FuncAnimation(self.fig, self._update_frame, frames=len(self.history), interval=200)
+        n_frames = int(duration / (self.engine.config.time_step * 5))
+        self.ani = FuncAnimation(self.fig, self._update, frames=n_frames, blit=True, interval=50)
         plt.show()
 
-    def _record_snapshot(self, t, metrics):
-        self.history.append(self.engine.get_topology_for_dashboard())
-
     def save_video(self, path: str):
-        self.engine.on_snapshot = self._record_snapshot
-        print("Running simulation to collect video frames...")
-        self.engine.run()
-        
-        print(f"Saving animation to {path}...")
-        anim = FuncAnimation(self.fig, self._update_frame, frames=len(self.history), interval=200)
-        anim.save(path, writer='ffmpeg', fps=10)
-        print("Video saved.")
+        # Requires ffmpeg
+        try:
+            self.ani.save(path, writer='ffmpeg', fps=20)
+        except Exception as e:
+            print(f"Failed to save video: {e}. Ensure ffmpeg is installed.")

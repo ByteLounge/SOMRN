@@ -1,93 +1,60 @@
-import sys
-import os
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
+import matplotlib.pyplot as plt
+import os
 
 def plot_results():
-    results_dir = Path(__file__).parent.parent / 'results'
-    csv_path = results_dir / 'all_results.csv'
-    
-    if not csv_path.exists():
-        print(f"Error: Results file {csv_path} not found.")
+    if not os.path.exists("results/all_results.csv"):
+        print("No results file found. Run run_batch.py first.")
         return
         
-    df = pd.read_csv(csv_path)
+    df = pd.DataFrame(pd.read_csv("results/all_results.csv"))
+    sns.set_theme(style="whitegrid")
     
-    sns.set_theme(style="whitegrid", palette="colorblind")
+    # Figure 1: PDR vs Speed
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=df, x="speed", y="pdr", hue="protocol", marker="o")
+    plt.title("Packet Delivery Ratio (PDR) vs. Node Speed")
+    plt.xlabel("Max Speed (m/s)")
+    plt.ylabel("PDR")
+    plt.savefig("results/pdr_vs_speed.pdf")
+    plt.savefig("results/pdr_vs_speed.png", dpi=300)
     
-    # Figure 1: PDR vs node speed
-    plt.figure(figsize=(8, 6))
-    df_load2 = df[df['Load'] == 2.0]
-    sns.lineplot(data=df_load2, x='Speed', y='PDR', hue='Protocol', marker='o', errorbar=('ci', 95))
-    plt.title("Figure 1: Packet Delivery Ratio vs Node Speed")
-    plt.savefig(results_dir / 'fig1_pdr_vs_speed.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig1_pdr_vs_speed.pdf', bbox_inches='tight')
-    plt.close()
+    # Figure 2: Delay vs Speed
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=df, x="speed", y="avg_delay", hue="protocol", marker="s")
+    plt.title("Average End-to-End Delay vs. Node Speed")
+    plt.xlabel("Max Speed (m/s)")
+    plt.ylabel("Avg Delay (s)")
+    plt.savefig("results/delay_vs_speed.pdf")
+    plt.savefig("results/delay_vs_speed.png", dpi=300)
     
-    # Figure 2: Average end-to-end delay vs node speed
-    plt.figure(figsize=(8, 6))
-    sns.lineplot(data=df_load2, x='Speed', y='AvgDelay', hue='Protocol', marker='o', errorbar=('ci', 95))
-    plt.title("Figure 2: Average Delay vs Node Speed")
-    plt.ylabel("Average Delay (s)")
-    plt.savefig(results_dir / 'fig2_delay_vs_speed.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig2_delay_vs_speed.pdf', bbox_inches='tight')
-    plt.close()
-    
-    # Figure 3: PDR vs traffic load
-    plt.figure(figsize=(8, 6))
-    df_speed10 = df[df['Speed'] == 10.0]
-    sns.lineplot(data=df_speed10, x='Load', y='PDR', hue='Protocol', marker='o', errorbar=('ci', 95))
-    plt.title("Figure 3: PDR vs Traffic Load")
+    # Figure 3: PDR vs Load
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=df, x="load", y="pdr", hue="protocol", marker="D")
+    plt.title("PDR vs. Traffic Load")
     plt.xlabel("Packet Rate (pkts/s)")
-    plt.savefig(results_dir / 'fig3_pdr_vs_load.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig3_pdr_vs_load.pdf', bbox_inches='tight')
-    plt.close()
+    plt.ylabel("PDR")
+    plt.savefig("results/pdr_vs_load.pdf")
     
-    # Figure 4: Control overhead vs node speed
-    plt.figure(figsize=(8, 6))
-    sns.lineplot(data=df_load2, x='Speed', y='ControlOverhead', hue='Protocol', marker='o', errorbar=('ci', 95))
-    plt.title("Figure 4: Control Overhead vs Node Speed")
-    plt.ylabel("Control Overhead Ratio")
-    plt.savefig(results_dir / 'fig4_overhead_vs_speed.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig4_overhead_vs_speed.pdf', bbox_inches='tight')
-    plt.close()
+    # Figure 4: Control Overhead vs Speed
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=df, x="speed", y="control_overhead", hue="protocol", marker="v")
+    plt.title("Control Overhead vs. Node Speed")
+    plt.xlabel("Max Speed (m/s)")
+    plt.ylabel("Control Bytes")
+    plt.savefig("results/overhead_vs_speed.pdf")
+
+    # Generate Summary Table (LaTeX)
+    summary = df.groupby(['protocol', 'speed']).agg({
+        'pdr': ['mean', 'std'],
+        'avg_delay': ['mean', 'std']
+    }).round(3)
     
-    # Figure 5: Throughput vs traffic load
-    plt.figure(figsize=(8, 6))
-    sns.lineplot(data=df_speed10, x='Load', y='Throughput', hue='Protocol', marker='o', errorbar=('ci', 95))
-    plt.title("Figure 5: Throughput vs Traffic Load")
-    plt.ylabel("Throughput (bytes/s)")
-    plt.xlabel("Packet Rate (pkts/s)")
-    plt.savefig(results_dir / 'fig5_throughput_vs_load.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig5_throughput_vs_load.pdf', bbox_inches='tight')
-    plt.close()
-    
-    # Figure 6: CDF of end-to-end delay (We approximate by barplot or lineplot since we don't have per-packet delay here)
-    # The requirement is just Figure 6, so we create a placeholder if full data is missing.
-    # To truly do CDF we'd need per-packet delays, which isn't in batch output. 
-    # Let's plot distribution of avg delay across seeds.
-    plt.figure(figsize=(8, 6))
-    sns.ecdfplot(data=df_speed10[df_speed10['Load'] == 2.0], x='AvgDelay', hue='Protocol')
-    plt.title("Figure 6: CDF of Average End-to-End Delay")
-    plt.xlabel("Average Delay (s)")
-    plt.savefig(results_dir / 'fig6_delay_cdf.png', dpi=300, bbox_inches='tight')
-    plt.savefig(results_dir / 'fig6_delay_cdf.pdf', bbox_inches='tight')
-    plt.close()
-    
-    # Summary Table
-    summary = df_speed10[df_speed10['Load'] == 2.0].groupby('Protocol').agg({
-        'PDR': ['mean', 'std'],
-        'AvgDelay': ['mean', 'std'],
-        'ControlOverhead': ['mean', 'std']
-    })
-    
-    tex_path = results_dir / 'summary_table.tex'
-    with open(tex_path, 'w') as f:
+    with open("results/summary_table.tex", "w") as f:
         f.write(summary.to_latex())
         
-    print("Plots and summary table generated successfully.")
+    print("Plots and summary table generated in results/ directory.")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     plot_results()

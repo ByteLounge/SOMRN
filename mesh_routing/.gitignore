@@ -1,12 +1,11 @@
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .pytest_cache/
-venv/
-env/
-.env
 results/*.csv
-results/*.mp4
 results/*.png
 results/*.pdf
+results/*.mp4
 results/*.tex
-!results/.gitkeep
+venv/
+.env

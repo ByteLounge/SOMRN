@@ -1,7 +1,10 @@
-from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
-from protocols.base import BaseProtocol
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Optional
 import networkx as nx
+from protocols.base import BaseProtocol
+from core.packet import Packet
+from core.network import WirelessNetwork
+from config import SimConfig
 
 @dataclass
 class NeighborEntry:
@@ -9,95 +12,117 @@ class NeighborEntry:
     link_quality: float
     last_hello: float
 
-@dataclass
-class HelloMessage:
-    src: int
-    neighbors: List[int]
-
-@dataclass
-class TCMessage:
-    src: int
-    seq_num: int
-    mpr_selectors: List[int]
-
 class OLSR(BaseProtocol):
-    def __init__(self, network, config):
+    """Implementation of Optimized Link State Routing (OLSR)."""
+    
+    HELLO_INTERVAL = 2.0
+    TC_INTERVAL = 5.0
+    NEIGHBOR_HOLD_TIME = 6.0
+    
+    def __init__(self, network: WirelessNetwork, config: SimConfig):
         super().__init__(network, config)
-        self.HELLO_INTERVAL = 2.0
-        self.TC_INTERVAL = 5.0
-        self.last_hello: Dict[int, float] = {n: 0.0 for n in network.nodes}
-        self.last_tc: Dict[int, float] = {n: 0.0 for n in network.nodes}
-        
         self.neighbors: Dict[int, Dict[int, NeighborEntry]] = {n: {} for n in network.nodes}
+        self.two_hop_neighbors: Dict[int, Dict[int, Set[int]]] = {n: {} for n in network.nodes}
         self.mpr_set: Dict[int, Set[int]] = {n: set() for n in network.nodes}
-        self.mpr_selectors: Dict[int, Set[int]] = {n: set() for n in network.nodes}
-        
-        self.topology_graph = nx.Graph()
+        self.topology_map = nx.DiGraph()
         self.routing_table: Dict[int, Dict[int, int]] = {n: {} for n in network.nodes}
-        self.tc_seq_nums: Dict[int, int] = {n: 0 for n in network.nodes}
-        self.seen_tcs: Dict[int, Dict[int, int]] = {n: {} for n in network.nodes} # node -> {src -> seq}
+        
+        self.last_hello = {n: 0.0 for n in network.nodes}
+        self.last_tc = {n: 0.0 for n in network.nodes}
 
-    def get_next_hop(self, node_id: int, packet) -> int:
-        if packet.dst in self.routing_table[node_id]:
-            return self.routing_table[node_id][packet.dst]
+    @property
+    def name(self) -> str:
+        return "OLSR"
+
+    def get_next_hop(self, node_id: int, packet: Packet) -> int:
+        dst = packet.dst
+        if dst in self.routing_table[node_id]:
+            return self.routing_table[node_id][dst]
         return -1
 
-    def on_link_change(self, changed_edges: List[Tuple[int, int]]):
-        # Reactive clearing not strictly OLSR, but helps simulator
-        pass
+    def on_link_change(self, changed_edges: List):
+        # OLSR relies on periodic HELLOs, but we can speed up reaction
+        self._recompute_all_routes()
 
     def on_timestep(self, t: float):
-        self._send_hellos(t)
-        self._compute_mprs()
-        self._send_tcs(t)
-        self._compute_routing_tables()
-
-    def _send_hellos(self, t: float):
-        for node in self.network.nodes:
-            if t - self.last_hello[node] >= self.HELLO_INTERVAL:
-                self.last_hello[node] = t
-                nbs = list(self.neighbors[node].keys())
-                msg = HelloMessage(node, nbs)
-                self.control_bytes_sent += 28 + len(nbs) * 4
+        for node_id in self.network.nodes:
+            # Send HELLO
+            if t - self.last_hello[node_id] >= self.HELLO_INTERVAL:
+                self._send_hello(node_id, t)
+                self.last_hello[node_id] = t
                 
-                for nb in self.network.get_neighbors(node):
-                    if nb not in self.neighbors[nb]:
-                        self.neighbors[nb][node] = NeighborEntry(node, 1.0, t)
-                    else:
-                        self.neighbors[nb][node].last_hello = t
+            # Send TC if MPR
+            if t - self.last_tc[node_id] >= self.TC_INTERVAL:
+                is_mpr_of_someone = any(node_id in mprs for mprs in self.mpr_set.values())
+                if is_mpr_of_someone:
+                    self._send_tc(node_id, t)
+                self.last_tc[node_id] = t
+                
+        # Expire neighbors
+        for node_id in self.neighbors:
+            expired = [nb for nb, entry in self.neighbors[node_id].items() if t - entry.last_hello > self.NEIGHBOR_HOLD_TIME]
+            for nb in expired:
+                del self.neighbors[node_id][nb]
+                if nb in self.two_hop_neighbors[node_id]:
+                    del self.two_hop_neighbors[node_id][nb]
+        
+        self._recompute_all_routes()
 
-    def _compute_mprs(self):
-        # Simplified MPR selection: just select all neighbors for simplicity
-        # Full MPR selection requires 2-hop knowledge, we approximate by selecting all for robustness in simulation
-        for node in self.network.nodes:
-            nbs = self.network.get_neighbors(node)
-            self.mpr_set[node] = set(nbs)
+    def _send_hello(self, node_id: int, t: float):
+        self.control_bytes_sent += 28
+        neighbors = self.network.get_neighbors(node_id)
+        for nb in neighbors:
+            quality = self.network.link_quality(self.network.nodes[node_id], self.network.nodes[nb])
+            if nb not in self.neighbors[node_id]:
+                self.neighbors[node_id][nb] = NeighborEntry(nb, quality, t)
+            else:
+                self.neighbors[node_id][nb].link_quality = quality
+                self.neighbors[node_id][nb].last_hello = t
+                
+        self._select_mprs(node_id)
+
+    def _select_mprs(self, node_id: int):
+        """Greedy MPR selection."""
+        # This is a simplification. Real OLSR shares 1-hop neighbors in HELLO to learn 2-hop.
+        # We'll use the network object to simulate that knowledge exchange.
+        one_hop = set(self.neighbors[node_id].keys())
+        two_hop = set()
+        nb_to_two_hop = {}
+        
+        for nb in one_hop:
+            nb_neighbors = set(self.network.get_neighbors(nb)) - one_hop - {node_id}
+            two_hop.update(nb_neighbors)
+            nb_to_two_hop[nb] = nb_neighbors
+            
+        mprs = set()
+        while two_hop:
+            # Pick neighbor that covers most uncovered 2-hop neighbors
+            best_nb = max(one_hop, key=lambda n: len(nb_to_two_hop.get(n, set()) & two_hop), default=None)
+            if not best_nb or not (nb_to_two_hop[best_nb] & two_hop):
+                break
+            mprs.add(best_nb)
+            two_hop -= nb_to_two_hop[best_nb]
+            
+        self.mpr_set[node_id] = mprs
+
+    def _send_tc(self, node_id: int, t: float):
+        # Advertise selector set (nodes that picked me as MPR)
+        selectors = [n for n, mprs in self.mpr_set.items() if node_id in mprs]
+        self.control_bytes_sent += 8 + 4 * len(selectors)
+        
+        for selector in selectors:
+            self.topology_map.add_edge(node_id, selector)
+            self.topology_map.add_edge(selector, node_id)
+
+    def _recompute_all_routes(self):
+        # Add current neighbors to topology map for 1-hop reachability
+        for node_id, nbs in self.neighbors.items():
             for nb in nbs:
-                self.mpr_selectors[nb].add(node)
-
-    def _send_tcs(self, t: float):
-        for node in self.network.nodes:
-            if len(self.mpr_selectors[node]) > 0:
-                if t - self.last_tc[node] >= self.TC_INTERVAL:
-                    self.last_tc[node] = t
-                    self.tc_seq_nums[node] += 1
-                    msg = TCMessage(node, self.tc_seq_nums[node], list(self.mpr_selectors[node]))
-                    self.control_bytes_sent += 32 + len(msg.mpr_selectors) * 4
-                    self._flood_tc(node, msg)
-
-    def _flood_tc(self, current_node: int, msg: TCMessage):
-        # Update global topology view (simulated centralized for OLSR routing table to avoid full message passing complex state)
-        for selector in msg.mpr_selectors:
-            self.topology_graph.add_edge(msg.src, selector)
-
-    def _compute_routing_tables(self):
-        # Rebuild routing tables from topology graph
-        for node in self.network.nodes:
-            if node in self.topology_graph:
-                try:
-                    paths = nx.single_source_shortest_path(self.topology_graph, node)
-                    for dst, path in paths.items():
-                        if len(path) > 1:
-                            self.routing_table[node][dst] = path[1]
-                except Exception:
-                    pass
+                self.topology_map.add_edge(node_id, nb)
+                
+        for node_id in self.network.nodes:
+            try:
+                paths = nx.single_source_shortest_path(self.topology_map, node_id)
+                self.routing_table[node_id] = {dst: path[1] for dst, path in paths.items() if len(path) > 1}
+            except nx.NodeNotFound:
+                self.routing_table[node_id] = {}

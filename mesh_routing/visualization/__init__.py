@@ -1,1 +1,1 @@
-# Visualization module
+# visualization module initialization

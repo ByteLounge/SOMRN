@@ -1,33 +1,33 @@
 import argparse
-import threading
 import sys
-import os
-from pathlib import Path
+import threading
 import time
-
+import os
 from config import SimConfig, ScenarioPresets
 from simulation.engine import SimulationEngine
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
+from visualization.dashboard import run_dashboard, update_state
+from visualization.animator import TopologyAnimator
 from core.mobility import RandomWaypointMobility, GaussMarkovMobility
 
 def main():
     parser = argparse.ArgumentParser(description="Wireless Mesh Network Simulator")
-    parser.add_argument('--protocol', choices=['aodv', 'olsr', 'cpqr'], default='cpqr')
-    parser.add_argument('--nodes', type=int, default=30)
-    parser.add_argument('--speed', type=float, default=5.0)
-    parser.add_argument('--load', type=float, default=2.0)
-    parser.add_argument('--duration', type=float, default=300.0)
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--live', action='store_true', help="Launch Dash dashboard")
-    parser.add_argument('--save-video', action='store_true', help="Save animation to mp4")
-    parser.add_argument('--mobility', choices=['rwp', 'gauss'], default='rwp')
-    parser.add_argument('--scenario', choices=['default', 'static', 'mobile', 'stress'], default='default')
+    parser.add_argument("--protocol", choices=['aodv', 'olsr', 'cpqr'], default='cpqr')
+    parser.add_argument("--nodes", type=int, default=30)
+    parser.add_argument("--speed", type=float, default=5.0)
+    parser.add_argument("--load", type=float, default=2.0)
+    parser.add_argument("--duration", type=float, default=300.0)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--live", action="store_true", help="Launch live Dash dashboard")
+    parser.add_argument("--save-video", action="store_true", help="Save animation to results/animation.mp4")
+    parser.add_argument("--mobility", choices=['rwp', 'gauss'], default='rwp')
+    parser.add_argument("--scenario", choices=['default', 'static', 'mobile', 'stress'], default='default')
     
     args = parser.parse_args()
     
-    # Configuration
+    # 1. Load configuration
     if args.scenario == 'static':
         config = ScenarioPresets.static_low_load()
     elif args.scenario == 'mobile':
@@ -35,82 +35,72 @@ def main():
     elif args.scenario == 'stress':
         config = ScenarioPresets.stress_test()
     else:
-        config = SimConfig()
-        config.num_nodes = args.nodes
-        config.max_speed = args.speed
-        config.min_speed = max(1.0, args.speed / 2.0) if args.speed > 0 else 0.0
-        config.packet_rate = args.load
-        config.duration = args.duration
-        config.seed = args.seed
+        config = SimConfig(
+            num_nodes=args.nodes,
+            max_speed=args.speed,
+            packet_rate=args.load,
+            duration=args.duration,
+            seed=args.seed
+        )
         
     protocol_map = {'aodv': AODV, 'olsr': OLSR, 'cpqr': CPQR}
-    proto_class = protocol_map[args.protocol]
-    
     mobility_map = {'rwp': RandomWaypointMobility, 'gauss': GaussMarkovMobility}
-    mob_class = mobility_map[args.mobility]
     
-    engine = SimulationEngine(proto_class, config, mobility_class=mob_class)
+    protocol_class = protocol_map[args.protocol]
+    mobility_class = mobility_map[args.mobility]
     
-    print(f"Starting simulation...")
-    print(f"Protocol: {args.protocol.upper()}")
-    print(f"Nodes: {config.num_nodes}, Max Speed: {config.max_speed} m/s, Load: {config.packet_rate} pkts/s")
-    print(f"Duration: {config.duration}s")
+    # 2. Setup Engine
+    engine = SimulationEngine(protocol_class, config, mobility_class)
     
-    dash_thread = None
+    # 3. Handle Live Dashboard
     if args.live:
-        from visualization import dashboard
-        
-        def push_to_dash(t, snapshot):
-            dashboard.update_state(
-                engine.get_topology_for_dashboard(),
-                engine.metrics.snapshots,
-                t,
-                args.protocol.upper()
-            )
-            
-        engine.on_snapshot = push_to_dash
-        
-        # Start dash in background
-        dash_thread = threading.Thread(target=dashboard.run, daemon=True)
+        print("Starting live dashboard at http://localhost:8050")
+        dash_thread = threading.Thread(target=run_dashboard, kwargs={'port': 8050}, daemon=True)
         dash_thread.start()
-        print("Dashboard available at http://localhost:8050")
         
-        # Give dash time to start
-        time.sleep(2)
+        # Register callback to push state to dashboard
+        def on_snapshot(t, snapshot):
+            update_state(engine.network, engine.metrics, t, engine.protocol.name)
         
-    if args.save_video:
-        from visualization.animator import TopologyAnimator
-        animator = TopologyAnimator(engine)
-        results_dir = Path(__file__).parent / 'results'
-        results_dir.mkdir(parents=True, exist_ok=True)
-        animator.save_video(str(results_dir / 'animation.mp4'))
-        metrics = engine.metrics
-    else:
-        metrics = engine.run()
-        
-    # Final Report
+        engine.on_snapshot_cb = on_snapshot
+
+    # 4. Run Simulation
+    print(f"Running simulation: {args.protocol.upper()} | Nodes: {config.num_nodes} | Speed: {config.max_speed}m/s")
+    start_time = time.time()
+    metrics = engine.run()
+    end_time = time.time()
+    
+    # 5. Final Report
     report = metrics.full_report()
-    print("\n--- FINAL RESULTS ---")
+    print("\n" + "="*30)
+    print("SIMULATION COMPLETE")
+    print(f"Execution Time: {end_time - start_time:.2f}s")
+    print("-" * 30)
     for k, v in report.items():
-        if isinstance(v, float):
-            print(f"{k}: {v:.4f}")
-        else:
-            print(f"{k}: {v}")
-            
-    # Save CSV
-    results_dir = Path(__file__).parent / 'results'
-    results_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = results_dir / f"{args.protocol}_{int(args.speed)}_{args.seed}.csv"
-    metrics.save_csv(str(csv_path))
+        print(f"{k.replace('_', ' ').title():<20}: {v:.4f}" if isinstance(v, float) else f"{k.replace('_', ' ').title():<20}: {v}")
+    print("="*30 + "\n")
+    
+    # 6. Save results
+    os.makedirs("results", exist_ok=True)
+    csv_path = f"results/{args.protocol}_{args.speed}_{args.seed}.csv"
+    metrics.save_csv(csv_path)
     print(f"Metrics saved to {csv_path}")
     
-    if args.live and dash_thread:
-        print("Simulation complete. Dashboard will remain running until you exit (Ctrl+C).")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+    # 7. Animation
+    if args.save_video:
+        print("Generating animation...")
+        animator = TopologyAnimator(engine)
+        # Note: animator needs a fresh engine or we reset the time
+        # For simplicity, we just save what we have or run a shorter one
+        animator.animate(duration=min(20, args.duration))
+        animator.save_video("results/animation.mp4")
 
-if __name__ == '__main__':
+    if args.live:
+        print("Simulation finished. Dashboard still running. Press Ctrl+C to exit.")
+        try:
+            while True: time.sleep(1)
+        except KeyboardInterrupt:
+            print("Exiting...")
+
+if __name__ == "__main__":
     main()

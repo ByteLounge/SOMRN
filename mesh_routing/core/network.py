@@ -3,90 +3,110 @@ import math
 from typing import Dict, Tuple, List, Optional
 from core.node import Node
 from core.link import Link
+from config import SimConfig
 
 class WirelessNetwork:
-    """Manages the network graph, nodes, and links."""
-    def __init__(self, config):
+    """Manages the network topology and physical layer simulation."""
+    def __init__(self, config: SimConfig):
         self.config = config
         self.graph = nx.Graph()
         self.nodes: Dict[int, Node] = {}
         self.links: Dict[Tuple[int, int], Link] = {}
         self.time: float = 0.0
 
-    def add_node(self, node: Node):
+    def add_node(self, node: Node) -> None:
         """Adds a node to the network."""
         self.nodes[node.id] = node
-        self.graph.add_node(node.id, pos=(node.x, node.y))
+        self.graph.add_node(node.id)
 
     def rssi(self, n1: Node, n2: Node) -> float:
-        """Calculates RSSI between two nodes using log-distance path loss."""
-        d = n1.distance_to(n2)
-        if d == 0:
-            return self.config.tx_power_dbm
+        """Calculates received signal strength using simplified path loss model."""
+        d = max(1.0, n1.distance_to(n2)) # Avoid log(0)
+        # Simplified Friis / log-distance path loss
+        # Pr = Pt - 10 * n * log10(d) - constant
+        # For simplicity, calibrating such that at tx_range, rssi = noise_floor
+        # constant = tx_power - noise_floor - 10 * n * log10(tx_range)
+        constant = self.config.tx_power_dbm - self.config.noise_floor_dbm - 10 * self.config.path_loss_exponent * math.log10(self.config.tx_range)
         
-        # Simplified Friis / Log-distance
-        d0 = 1.0
-        if d < d0:
-            return self.config.tx_power_dbm
-        
-        path_loss = 10 * self.config.path_loss_exponent * math.log10(d / d0)
-        return self.config.tx_power_dbm - path_loss
+        rssi_val = self.config.tx_power_dbm - 10 * self.config.path_loss_exponent * math.log10(d) - constant
+        return rssi_val
 
     def link_quality(self, n1: Node, n2: Node) -> float:
-        """Computes link quality (0 to 1) based on RSSI."""
-        r = self.rssi(n1, n2)
-        if r < self.config.noise_floor_dbm:
+        """Calculates link quality (0.0 to 1.0) based on RSSI and noise floor."""
+        rssi_val = self.rssi(n1, n2)
+        margin = rssi_val - self.config.noise_floor_dbm
+        
+        if margin <= 0:
             return 0.0
-        # Normalize between noise floor and max expected RSSI (e.g., -30 dBm)
-        q = (r - self.config.noise_floor_dbm) / (-30.0 - self.config.noise_floor_dbm)
-        return max(0.0, min(1.0, q))
+        elif margin >= 20: # 20dB fade margin gives 100% quality
+            return 1.0
+        else:
+            return margin / 20.0
 
-    def update_links(self):
-        """Rebuilds edges based on current node positions."""
+    def update_links(self) -> None:
+        """Updates all links in the network based on current node positions."""
         self.graph.clear_edges()
-        for i, n1 in self.nodes.items():
-            for j, n2 in self.nodes.items():
-                if i >= j:
-                    continue
-                d = n1.distance_to(n2)
-                if d <= self.config.tx_range:
-                    r = self.rssi(n1, n2)
-                    if r >= self.config.noise_floor_dbm:
-                        self.graph.add_edge(i, j)
-                        link_key = (min(i, j), max(i, j))
+        
+        node_ids = list(self.nodes.keys())
+        for i in range(len(node_ids)):
+            for j in range(i + 1, len(node_ids)):
+                id1 = node_ids[i]
+                id2 = node_ids[j]
+                n1 = self.nodes[id1]
+                n2 = self.nodes[id2]
+                
+                dist = n1.distance_to(n2)
+                if dist <= self.config.tx_range:
+                    rssi_val = self.rssi(n1, n2)
+                    quality = self.link_quality(n1, n2)
+                    
+                    if quality > 0.01: # Threshold for active link
+                        self.graph.add_edge(id1, id2, weight=dist)
+                        
+                        link_key = tuple(sorted((id1, id2)))
                         if link_key not in self.links:
-                            self.links[link_key] = Link(min(i, j), max(i, j))
-                        link = self.links[link_key]
-                        link.update(r, self.time)
-                        n1.rssi_to[j] = r
-                        n2.rssi_to[i] = r
+                            self.links[link_key] = Link(link_key[0], link_key[1])
+                            
+                        self.links[link_key].update(rssi_val, self.time)
+                        self.links[link_key].quality = quality
+                        
+                        # Update node RSSI caches
+                        n1.rssi_to[id2] = rssi_val
+                        n2.rssi_to[id1] = rssi_val
 
     def get_neighbors(self, node_id: int) -> List[int]:
-        """Returns list of neighbor IDs for a given node."""
-        if node_id in self.graph:
+        """Returns a list of neighbor node IDs for a given node."""
+        if self.graph.has_node(node_id):
             return list(self.graph.neighbors(node_id))
         return []
 
     def get_link(self, n1_id: int, n2_id: int) -> Optional[Link]:
-        """Gets link object between two nodes."""
-        link_key = (min(n1_id, n2_id), max(n1_id, n2_id))
+        """Returns the Link object between two nodes if it exists."""
+        link_key = tuple(sorted((n1_id, n2_id)))
         return self.links.get(link_key)
 
     def is_connected(self, src: int, dst: int) -> bool:
-        """Checks if there's a path between src and dst."""
-        if src in self.graph and dst in self.graph:
+        """Checks if a path exists between src and dst."""
+        try:
             return nx.has_path(self.graph, src, dst)
-        return False
+        except nx.NodeNotFound:
+            return False
 
     def shortest_path(self, src: int, dst: int) -> List[int]:
-        """Returns shortest path (sequence of node IDs)."""
-        if self.is_connected(src, dst):
+        """Returns the shortest path (list of node IDs) or empty list if no path."""
+        try:
             return nx.shortest_path(self.graph, src, dst)
-        return []
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return []
 
-    def topology_snapshot(self) -> dict:
-        """Returns graph snapshot for dashboard."""
-        return {
+    def topology_snapshot(self) -> Dict:
+        """Returns a serializable snapshot of the current topology for the dashboard."""
+        snapshot = {
             'nodes': [{'id': n.id, 'x': n.x, 'y': n.y} for n in self.nodes.values()],
-            'edges': [{'source': u, 'target': v} for u, v in self.graph.edges()]
+            'edges': []
         }
+        for u, v in self.graph.edges():
+            link = self.get_link(u, v)
+            quality = link.quality if link else 0.0
+            snapshot['edges'].append({'source': u, 'target': v, 'quality': quality})
+        return snapshot

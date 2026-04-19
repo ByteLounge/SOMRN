@@ -1,118 +1,123 @@
-import random
-from typing import Dict, List, Tuple
-from protocols.base import BaseProtocol
 import numpy as np
+from typing import Dict, List, Optional
+from protocols.base import BaseProtocol
+from core.packet import Packet
+from core.network import WirelessNetwork
+from config import SimConfig
 
 class CPQR(BaseProtocol):
-    def __init__(self, network, config):
+    """
+    Congestion-Predictive Q-Routing (CPQR).
+    A novel RL-based routing protocol that considers link lifetime and congestion.
+    """
+    LLT_THRESHOLD = 5.0 # Seconds
+    
+    def __init__(self, network: WirelessNetwork, config: SimConfig):
         super().__init__(network, config)
-        self.Q: Dict[int, Dict[int, Dict[int, float]]] = {}
-        self.in_flight: Dict[str, Dict] = {} # packet_id -> {node, dst, via, sent_at}
-        self.LLT_THRESHOLD = 3.0 # seconds warning before break
+        # Q-table: Q[node_id][dst_id][neighbor_id] = estimated cost (delay)
+        self.q_table: Dict[int, Dict[int, Dict[int, float]]] = {}
+        self.rng = np.random.default_rng(config.seed)
+        self.in_flight: Dict[str, tuple] = {} # packet_id -> (node_id, next_hop, sent_at)
         
-        # Initialize Q-table
         for n in network.nodes:
-            self.Q[n] = {}
-            for d in network.nodes:
-                self.Q[n][d] = {}
-                for nb in network.nodes:
-                    self.Q[n][d][nb] = 10.0 # Optimistic initial value
+            self.q_table[n] = {}
+            
+    @property
+    def name(self) -> str:
+        return "CPQR"
 
-    def get_next_hop(self, node_id: int, packet) -> int:
+    def _get_q(self, u: int, d: int, v: int) -> float:
+        if d not in self.q_table[u]:
+            self.q_table[u][d] = {}
+        if v not in self.q_table[u][d]:
+            self.q_table[u][d][v] = 10.0 # Optimistic initial value
+        return self.q_table[u][d][v]
+
+    def get_next_hop(self, node_id: int, packet: Packet) -> int:
         dst = packet.dst
         neighbors = self.network.get_neighbors(node_id)
-        
         if not neighbors:
             return -1
             
-        if dst in neighbors and self._link_safe(node_id, dst):
-            return dst
-
-        viable_neighbors = [nb for nb in neighbors if self._link_safe(node_id, nb)]
+        # Filter neighbors by predicted link lifetime
+        safe_neighbors = []
+        for nb in neighbors:
+            link = self.network.get_link(node_id, nb)
+            if link and link.predicted_lifetime(self.config.time_step, self.config.noise_floor_dbm + 5) > self.LLT_THRESHOLD:
+                safe_neighbors.append(nb)
+                
+        # Fallback to all neighbors if no "safe" ones exist
+        viable = safe_neighbors if safe_neighbors else neighbors
         
-        if not viable_neighbors:
-            viable_neighbors = neighbors # Fallback
-            
-        if random.random() < self.config.epsilon:
-            next_hop = random.choice(viable_neighbors)
+        # Epsilon-greedy selection
+        if self.rng.random() < self.config.epsilon:
+            next_hop = self.rng.choice(viable)
         else:
-            best_score = float('inf')
-            next_hop = viable_neighbors[0]
-            for nb in viable_neighbors:
-                q_val = self.Q[node_id][dst].get(nb, 10.0)
+            scores = []
+            for nb in viable:
+                q_val = self._get_q(node_id, dst, nb)
+                # Congestion penalty
                 nb_node = self.network.nodes[nb]
                 cp = self.config.beta * nb_node.predicted_queue_depth(self.config.lambda_ewma)
-                score = q_val + cp
-                if score < best_score:
-                    best_score = score
-                    next_hop = nb
-                    
-        self.in_flight[packet.packet_id] = {
-            'node': node_id,
-            'dst': dst,
-            'via': next_hop,
-            'sent_at': self.network.time
-        }
-        
+                scores.append(q_val + cp)
+            
+            next_hop = viable[np.argmin(scores)]
+            
+        self.in_flight[packet.packet_id] = (node_id, next_hop, self.network.time)
         return next_hop
 
-    def on_packet_delivered(self, packet, delivery_time: float):
+    def on_packet_delivered(self, packet: Packet):
+        """Update Q-values upon successful delivery."""
         if packet.packet_id in self.in_flight:
-            info = self.in_flight[packet.packet_id]
-            node = info['node']
-            dst = info['dst']
-            via = info['via']
-            delay = delivery_time - info['sent_at']
+            u, v, t_sent = self.in_flight[packet.packet_id]
+            delay = self.network.time - t_sent
+            dst = packet.dst
             
-            old_q = self.Q[node][dst].get(via, 10.0)
+            old_q = self._get_q(u, dst, v)
             
-            # min Q at next hop
-            min_q_nb = 0.0
-            if via != dst:
-                q_vals = [self.Q[via][dst].get(n, 10.0) for n in self.network.get_neighbors(via)]
-                min_q_nb = min(q_vals) if q_vals else 10.0
-                
-            new_q = (1 - self.config.alpha) * old_q + self.config.alpha * (delay + self.config.gamma * min_q_nb)
-            self.Q[node][dst][via] = new_q
+            # Learn from the next hop's best Q-value to destination
+            next_hop_qs = self.q_table[v].get(dst, {})
+            min_q_next = min(next_hop_qs.values()) if next_hop_qs else 0.0
+            
+            # Q-learning update
+            new_q = (1 - self.config.alpha) * old_q + self.config.alpha * (delay + self.config.gamma * min_q_next)
+            self.q_table[u][dst][v] = new_q
             
             del self.in_flight[packet.packet_id]
 
-    def on_packet_dropped(self, packet):
+    def on_packet_dropped(self, packet: Packet):
+        """Penalize Q-values upon packet drop."""
         if packet.packet_id in self.in_flight:
-            info = self.in_flight[packet.packet_id]
-            node = info['node']
-            dst = info['dst']
-            via = info['via']
-            
-            self.Q[node][dst][via] = 1000.0 * 0.5 # Penalty
+            u, v, _ = self.in_flight[packet.packet_id]
+            dst = packet.dst
+            self.q_table[u][dst][v] = 1000.0 # High penalty
             del self.in_flight[packet.packet_id]
 
-    def _link_safe(self, n1: int, n2: int) -> bool:
-        link = self.network.get_link(n1, n2)
-        if not link:
-            return False
-        return link.predicted_lifetime(self.config.time_step, self.config.noise_floor_dbm) > self.LLT_THRESHOLD
-
-    def on_link_change(self, changed_edges: List[Tuple[int, int]]):
-        broken = set(changed_edges)
-        for node in self.network.nodes:
-            for dst in self.network.nodes:
-                for via in list(self.Q[node][dst].keys()):
-                    if (node, via) in broken or (via, node) in broken:
-                        self.Q[node][dst][via] = 1000.0 # INF
+    def on_link_change(self, changed_edges: List):
+        for u, v, status in changed_edges:
+            if status == 'down':
+                # Invalidate routes through this link
+                for dst in self.q_table[u]:
+                    if v in self.q_table[u][dst]:
+                        self.q_table[u][dst][v] = 1000.0
+                for dst in self.q_table[v]:
+                    if u in self.q_table[v][dst]:
+                        self.q_table[v][dst][u] = 1000.0
 
     def on_timestep(self, t: float):
-        # RSSI updates handled by network.update_links(), Q-updates on events
         pass
 
-    def get_qtable_stats(self) -> dict:
-        stats = {}
-        for n in self.network.nodes:
-            vals = []
-            for d in self.Q[n]:
-                vals.extend(self.Q[n][d].values())
-            if vals:
-                stats[n] = {'mean': np.mean(vals), 'max': np.max(vals), 'min': np.min(vals)}
-            else:
-                stats[n] = {'mean': 10.0, 'max': 10.0, 'min': 10.0}
-        return stats
+    def get_qtable_stats(self) -> Dict:
+        """Returns aggregate statistics about the Q-table."""
+        all_vals = []
+        for dst_dict in self.q_table.values():
+            for nb_dict in dst_dict.values():
+                all_vals.extend(nb_dict.values())
+        
+        if not all_vals:
+            return {'mean': 0, 'max': 0, 'min': 0}
+        return {
+            'mean': float(np.mean(all_vals)),
+            'max': float(np.max(all_vals)),
+            'min': float(np.min(all_vals))
+        }

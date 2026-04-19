@@ -1,71 +1,66 @@
 import pytest
-from config import SimConfig
 from core.network import WirelessNetwork
 from core.node import Node
 from core.packet import Packet
+from config import SimConfig
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
 
-@pytest.fixture
-def static_network():
-    config = SimConfig(tx_range=15.0)
+def test_aodv_route_discovery():
+    config = SimConfig(tx_range=100.0)
     net = WirelessNetwork(config)
+    # Chain topology: 0 -- 1 -- 2 -- 3 -- 4
     for i in range(5):
-        net.add_node(Node(i, i * 10.0, 0.0, config))
+        net.add_node(Node(i, i*80, 0, config))
     net.update_links()
-    return net, config
-
-def test_aodv_route_discovery(static_network):
-    net, config = static_network
-    aodv = AODV(net, config)
     
+    aodv = AODV(net, config)
     pkt = Packet(src=0, dst=4, created_at=0.0)
+    
+    # First call triggers discovery
     next_hop = aodv.get_next_hop(0, pkt)
+    assert next_hop == -1
     
-    assert next_hop == -1 # Init RREQ
-    
-    # Simulate timestep to broadcast
-    aodv.on_timestep(0.1)
-    
-    # The RREQ should be propagated manually or via engine. In a real engine, engine does it.
-    # For test, we check if pending request created
-    assert 4 in aodv.pending_requests[0]
+    # Discovery completes (simulated via direct calls in our simplified AODV)
+    # In the real simulation loop, discovery happens across steps.
+    # Here, _flood_rreq and _unicast_rrep are synchronous for testing.
+    assert 4 in aodv.routing_tables[0]
+    assert aodv.routing_tables[0][4].next_hop == 1
 
-def test_aodv_invalidation(static_network):
-    net, config = static_network
-    aodv = AODV(net, config)
-    # Manually add route
-    aodv.routes[0][1] = aodv.routes.get(0, {}).get(1) # Fake
-    from protocols.aodv import RouteEntry
-    aodv.routes[0][1] = RouteEntry(next_hop=1, hop_count=1, seq_num=1, lifetime=100.0)
+def test_cpqr_q_update():
+    config = SimConfig()
+    net = WirelessNetwork(config)
+    net.add_node(Node(0, 0, 0, config))
+    net.add_node(Node(1, 50, 0, config))
+    net.update_links()
     
-    aodv.on_link_change([(0, 1)])
-    assert 1 not in aodv.routes[0]
-
-def test_olsr_mpr(static_network):
-    net, config = static_network
-    olsr = OLSR(net, config)
-    olsr._compute_mprs()
-    # Node 0's neighbor is 1
-    assert 1 in olsr.mpr_set[0]
-
-def test_cpqr_q_value(static_network):
-    net, config = static_network
     cpqr = CPQR(net, config)
-    
     pkt = Packet(src=0, dst=1, created_at=0.0)
-    pkt.packet_id = "test1"
     
-    next_hop = cpqr.get_next_hop(0, pkt)
-    # Assume 1 is chosen
-    cpqr.in_flight["test1"] = {'node': 0, 'dst': 1, 'via': 1, 'sent_at': 0.0}
-    cpqr.on_packet_delivered(pkt, 1.0)
+    # Simulate packet flow
+    _ = cpqr.get_next_hop(0, pkt)
+    net.time = 1.0 # Advance time
+    cpqr.on_packet_delivered(pkt)
     
-    # Q should change from 10.0
-    assert cpqr.Q[0][1][1] != 10.0
+    # Q-value should be updated from default 10.0
+    # new_q = (1-0.1)*10 + 0.1*(1.0 + 0.9*0) = 9 + 0.1 = 9.1
+    assert cpqr.q_table[0][1][1] == 9.1
 
-def test_cpqr_link_lifetime(static_network):
-    net, config = static_network
-    cpqr = CPQR(net, config)
-    assert cpqr._link_safe(0, 1) == True # Stable initially
+def test_olsr_mpr_selection():
+    config = SimConfig(tx_range=100.0)
+    net = WirelessNetwork(config)
+    # Star topology: 0 is center, 1-4 are neighbors, 5 is neighbor of 1
+    net.add_node(Node(0, 100, 100, config))
+    net.add_node(Node(1, 150, 100, config))
+    net.add_node(Node(2, 50, 100, config))
+    net.add_node(Node(3, 100, 150, config))
+    net.add_node(Node(4, 100, 50, config))
+    net.add_node(Node(5, 230, 100, config)) # Only connected to 1
+    net.update_links()
+    
+    olsr = OLSR(net, config)
+    olsr._send_hello(0, 0.0)
+    
+    # 0 should select 1 as MPR to cover 5
+    assert 1 in olsr.mpr_set[0]

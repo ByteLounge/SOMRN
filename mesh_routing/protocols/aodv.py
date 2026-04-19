@@ -1,132 +1,199 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Optional
 from protocols.base import BaseProtocol
+from core.packet import Packet
+from core.network import WirelessNetwork
+from config import SimConfig
 
 @dataclass
 class RouteEntry:
+    """Entry in the AODV routing table."""
     next_hop: int
     hop_count: int
     seq_num: int
     lifetime: float
+    precursors: Set[int] = field(default_factory=set)
 
 @dataclass
 class PendingRequest:
+    """A RREQ that is currently awaiting a response."""
     dst: int
     rreq_id: int
     created_at: float
-    waiting_packets: list = field(default_factory=list)
+    waiting_packets: List[Packet] = field(default_factory=list)
     retries: int = 0
 
 class AODV(BaseProtocol):
-    def __init__(self, network, config):
+    """Implementation of the Ad-hoc On-Demand Distance Vector (AODV) routing protocol."""
+    
+    ROUTE_LIFETIME = 30.0
+    RREQ_TIMEOUT = 3.0
+    RREQ_RETRIES = 2
+    LOCAL_REPAIR_ATTEMPTS = 1
+    
+    # Control packet sizes (bytes)
+    RREQ_SIZE = 48
+    RREP_SIZE = 32
+    RERR_SIZE = 24
+    HELLO_SIZE = 20
+    
+    def __init__(self, network: WirelessNetwork, config: SimConfig):
         super().__init__(network, config)
-        self.routes: Dict[int, Dict[int, RouteEntry]] = {n: {} for n in network.nodes}
-        self.pending_requests: Dict[int, Dict[int, PendingRequest]] = {n: {} for n in network.nodes}
-        self.seq_nums: Dict[int, int] = {n: 1 for n in network.nodes}
-        self.rreq_id: int = 1
-        self.seen_rreqs: Set[Tuple[int, int]] = set() # (src, rreq_id)
+        self.routing_tables: Dict[int, Dict[int, RouteEntry]] = {} # node_id -> {dst_id -> entry}
+        self.pending_requests: Dict[int, Dict[int, PendingRequest]] = {} # node_id -> {dst_id -> request}
+        self.seen_rreqs: Dict[int, List[tuple]] = {} # node_id -> [(src, rreq_id)] - LRU
+        self.rreq_counter: Dict[int, int] = {} # node_id -> last_rreq_id
+        self.node_seq_num: Dict[int, int] = {} # node_id -> current_seq_num
         
-        # Constants
-        self.ROUTE_LIFETIME = 30.0
-        self.RREQ_TIMEOUT = 3.0
-        self.RREQ_RETRIES = 2
-        
-        self.RREQ_SIZE = 48
-        self.RREP_SIZE = 32
-        self.RERR_SIZE = 24
+        for node_id in network.nodes:
+            self.routing_tables[node_id] = {}
+            self.pending_requests[node_id] = {}
+            self.seen_rreqs[node_id] = []
+            self.rreq_counter[node_id] = 0
+            self.node_seq_num[node_id] = 1
 
-    def get_next_hop(self, node_id: int, packet) -> int:
+    @property
+    def name(self) -> str:
+        return "AODV"
+
+    def get_next_hop(self, node_id: int, packet: Packet) -> int:
+        """Lookup route for destination; trigger discovery if needed."""
         dst = packet.dst
-        if dst in self.routes[node_id]:
-            entry = self.routes[node_id][dst]
-            if entry.lifetime > self.network.time:
-                # Refresh lifetime on use
-                entry.lifetime = self.network.time + self.ROUTE_LIFETIME
-                return entry.next_hop
+        
+        # Check if route exists and is fresh
+        if dst in self.routing_tables[node_id]:
+            entry = self.routing_tables[node_id][dst]
+            if self.network.time < entry.lifetime:
+                # Validate link is still active
+                if entry.next_hop in self.network.get_neighbors(node_id):
+                    return entry.next_hop
+                else:
+                    # Link broken, invalidate and trigger RERR
+                    del self.routing_tables[node_id][dst]
             else:
-                # Expired
-                del self.routes[node_id][dst]
-                
-        # Needs route discovery
-        if dst not in self.pending_requests[node_id]:
-            self._initiate_rreq(node_id, dst)
+                del self.routing_tables[node_id][dst]
         
-        req = self.pending_requests[node_id][dst]
-        req.waiting_packets.append(packet)
-        return -1 # Drop or hold, engine handles returning -1
+        # Trigger route discovery
+        self._discover_route(node_id, packet)
+        return -1 # Packet must wait in buffer
 
-    def _initiate_rreq(self, src: int, dst: int):
-        self.seq_nums[src] += 1
-        rreq_id = self.rreq_id
-        self.rreq_id += 1
-        self.pending_requests[src][dst] = PendingRequest(dst, rreq_id, self.network.time)
-        self.seen_rreqs.add((src, rreq_id))
-        
-        # Broadcast RREQ to neighbors
-        for nb in self.network.get_neighbors(src):
-            self.control_bytes_sent += self.RREQ_SIZE
-            self._process_rreq(nb, src, dst, src, 1, self.seq_nums[src], rreq_id)
-
-    def _process_rreq(self, node: int, src: int, dst: int, prev_hop: int, hop_count: int, src_seq: int, rreq_id: int):
-        if (src, rreq_id) in self.seen_rreqs:
+    def _discover_route(self, node_id: int, packet: Packet):
+        """Initiates RREQ flooding for a destination."""
+        dst = packet.dst
+        if dst in self.pending_requests[node_id]:
+            self.pending_requests[node_id][dst].waiting_packets.append(packet)
             return
-        self.seen_rreqs.add((src, rreq_id))
+            
+        rreq_id = self.rreq_counter[node_id] + 1
+        self.rreq_counter[node_id] = rreq_id
         
-        # Setup reverse route
-        if src not in self.routes[node] or self.routes[node][src].seq_num < src_seq:
-            self.routes[node][src] = RouteEntry(prev_hop, hop_count, src_seq, self.network.time + self.ROUTE_LIFETIME)
-            
-        if node == dst or (dst in self.routes[node] and self.routes[node][dst].lifetime > self.network.time):
-            # Send RREP
-            dst_seq = self.seq_nums[dst] if node == dst else self.routes[node][dst].seq_num
-            target_hop = 0 if node == dst else self.routes[node][dst].hop_count
-            self.control_bytes_sent += self.RREP_SIZE
-            self._process_rrep(prev_hop, src, dst, node, target_hop + 1, dst_seq)
-        else:
-            # Forward RREQ
-            for nb in self.network.get_neighbors(node):
-                if nb != prev_hop:
-                    self.control_bytes_sent += self.RREQ_SIZE
-                    self._process_rreq(nb, src, dst, node, hop_count + 1, src_seq, rreq_id)
+        req = PendingRequest(dst, rreq_id, self.network.time)
+        req.waiting_packets.append(packet)
+        self.pending_requests[node_id][dst] = req
+        
+        # Broadcast RREQ
+        self._flood_rreq(node_id, node_id, dst, rreq_id, 0)
 
-    def _process_rrep(self, node: int, src: int, dst: int, prev_hop: int, hop_count: int, dst_seq: int):
-        if dst not in self.routes[node] or self.routes[node][dst].seq_num < dst_seq:
-            self.routes[node][dst] = RouteEntry(prev_hop, hop_count, dst_seq, self.network.time + self.ROUTE_LIFETIME)
+    def _flood_rreq(self, start_node: int, src: int, dst: int, rreq_id: int, start_hops: int):
+        """Iterative RREQ flooding simulation."""
+        queue = [(start_node, start_hops)]
+        
+        while queue:
+            current_node, hops = queue.pop(0)
+            self.control_bytes_sent += 48
             
-        if node == src:
-            if dst in self.pending_requests[node]:
-                # Packets can now be forwarded on next timestep
-                del self.pending_requests[node][dst]
-        else:
-            # Forward RREP along reverse path
-            if src in self.routes[node]:
-                next_hop = self.routes[node][src].next_hop
-                self.control_bytes_sent += self.RREP_SIZE
-                self._process_rrep(next_hop, src, dst, node, hop_count + 1, dst_seq)
+            if hops >= 10: continue # TTL
 
-    def on_link_change(self, changed_edges: List[Tuple[int, int]]):
-        broken_links = set(changed_edges)
-        for node in self.routes:
-            to_remove = []
-            for dst, entry in self.routes[node].items():
-                if (node, entry.next_hop) in broken_links or (entry.next_hop, node) in broken_links:
-                    to_remove.append(dst)
-            for dst in to_remove:
-                del self.routes[node][dst]
-                self.control_bytes_sent += self.RERR_SIZE # Broadcast RERR approx
+            neighbors = self.network.get_neighbors(current_node)
+            for nb in neighbors:
+                if (src, rreq_id) in self.seen_rreqs[nb]:
+                    continue
+                self.seen_rreqs[nb].add((src, rreq_id))
+                
+                # Update reverse route to source
+                if src not in self.routing_tables[nb]:
+                    self.routing_tables[nb][src] = RouteEntry(current_node, hops + 1, 0, self.network.time + self.ROUTE_LIFETIME)
+                
+                # Destination reached?
+                if nb == dst:
+                    self._unicast_rrep(nb, src, dst, 0)
+                    # Once a RREP is triggered, we can stop this branch, 
+                    # but in real AODV others might still forward.
+                else:
+                    queue.append((nb, hops + 1))
+
+    def _unicast_rrep(self, start_node: int, src: int, dst: int, start_hops: int):
+        """Iterative RREP unicast back to source."""
+        curr = start_node
+        hops = start_hops
+        
+        visited = set()
+        while curr != src and curr not in visited:
+            visited.add(curr)
+            self.control_bytes_sent += 32
+            
+            # Find route back to source
+            if src in self.routing_tables[curr]:
+                next_node = self.routing_tables[curr][src].next_hop
+                
+                # Update forward route to destination
+                if dst not in self.routing_tables[next_node]:
+                    self.routing_tables[next_node][dst] = RouteEntry(curr, hops + 1, 0, self.network.time + self.ROUTE_LIFETIME)
+                
+                curr = next_node
+                hops += 1
+            else:
+                break 
+
+    def on_link_change(self, changed_edges: List):
+        """Invalidate routes using broken links."""
+        for u, v, status in changed_edges:
+            if status == 'down':
+                for node_id in [u, v]:
+                    broken_neighbor = v if node_id == u else u
+                    to_delete = []
+                    for dst, entry in self.routing_tables[node_id].items():
+                        if entry.next_hop == broken_neighbor:
+                            to_delete.append(dst)
+                    
+                    if to_delete:
+                        self.control_bytes_sent += 24 # RERR
+                        for dst in to_delete:
+                            del self.routing_tables[node_id][dst]
 
     def on_timestep(self, t: float):
-        # Retry or timeout pending RREQs
-        for node, reqs in list(self.pending_requests.items()):
-            to_remove = []
-            for dst, req in list(reqs.items()):
+        """Expire old routes and pending requests."""
+        for node_id in self.routing_tables:
+            # Expire routes
+            to_expire = [dst for dst, entry in self.routing_tables[node_id].items() if entry.lifetime < t]
+            for dst in to_expire:
+                del self.routing_tables[node_id][dst]
+                
+            # Retransmit pending RREQs
+            to_retry = []
+            for dst, req in self.pending_requests[node_id].items():
                 if t - req.created_at > self.RREQ_TIMEOUT:
                     if req.retries < self.RREQ_RETRIES:
-                        req.retries += 1
-                        req.created_at = t
-                        self._initiate_rreq(node, dst)
+                        to_retry.append(dst)
                     else:
-                        # Drop waiting packets? The engine handles dropping if unroutable
-                        to_remove.append(dst)
-            for dst in to_remove:
-                del self.pending_requests[node][dst]
+                        # Drop packets - route not found
+                        for p in req.waiting_packets:
+                            p.dropped = True
+                            p.drop_reason = "Route Discovery Failed"
+                        # Cleanup later
+            
+            for dst in to_retry:
+                req = self.pending_requests[node_id][dst]
+                req.retries += 1
+                req.created_at = t
+                self._flood_rreq(node_id, node_id, dst, req.rreq_id, 0)
+                
+            # Cleanup failed requests
+            failed = [dst for dst, req in self.pending_requests[node_id].items() 
+                      if req.retries >= self.RREQ_RETRIES and t - req.created_at > self.RREQ_TIMEOUT]
+            for dst in failed:
+                del self.pending_requests[node_id][dst]
+                
+            # If route now exists for pending requests, they will be handled next time get_next_hop is called
+            # (In this simplified engine, we don't have a separate buffer flush, 
+            # get_next_hop is called for every packet in the node's queue every step)

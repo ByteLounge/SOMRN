@@ -1,157 +1,156 @@
 import numpy as np
-from typing import Callable, List, Optional
-from core.network import WirelessNetwork
+from typing import List, Dict, Type, Callable, Optional
 from core.node import Node
+from core.network import WirelessNetwork
 from core.packet import Packet
-from core.mobility import RandomWaypointMobility
+from core.mobility import RandomWaypointMobility, GaussMarkovMobility
+from protocols.base import BaseProtocol
 from metrics.collector import MetricsCollector
+from config import SimConfig
 
 class SimulationEngine:
-    def __init__(self, protocol_class, config, mobility_class=RandomWaypointMobility):
+    """Core simulation engine that orchestrates the network, mobility, and protocols."""
+    def __init__(self, 
+                 protocol_class: Type[BaseProtocol], 
+                 config: SimConfig, 
+                 mobility_class: Type = RandomWaypointMobility):
         self.config = config
         self.rng = np.random.default_rng(config.seed)
-        self.network = WirelessNetwork(config)
-        self.metrics = MetricsCollector()
         
-        # Build network nodes
+        # Initialize network
+        self.network = WirelessNetwork(config)
         for i in range(config.num_nodes):
             x = self.rng.uniform(0, config.area_size)
             y = self.rng.uniform(0, config.area_size)
             self.network.add_node(Node(i, x, y, config))
             
         self.network.update_links()
-        self.mobility = mobility_class(self.network.nodes, config, self.rng)
+        
+        # Initialize mobility
+        self.mobility = mobility_class(list(self.network.nodes.values()), config)
+        
+        # Initialize protocol
         self.protocol = protocol_class(self.network, config)
         
-        # Traffic flows (src, dst)
+        # Initialize metrics
+        self.metrics = MetricsCollector()
+        
+        # Traffic flows: (src, dst)
         self.flows = []
-        nodes_list = list(self.network.nodes.keys())
-        while len(self.flows) < config.num_flows and len(nodes_list) >= 2:
-            src, dst = self.rng.choice(nodes_list, 2, replace=False)
-            self.flows.append((src, dst))
+        node_ids = list(self.network.nodes.keys())
+        for _ in range(config.num_flows):
+            src, dst = self.rng.choice(node_ids, 2, replace=False)
+            self.flows.append((int(src), int(dst)))
             
-        self.on_snapshot: Optional[Callable] = None
-        self.packet_rate_per_flow = config.packet_rate / max(1, config.num_flows)
-        self.next_packet_times = {i: self.rng.exponential(1.0 / config.packet_rate) for i in range(len(self.flows))}
+        self.on_snapshot_cb: Optional[Callable] = None
 
     def run(self) -> MetricsCollector:
+        """Runs the simulation for the configured duration."""
         n_steps = int(self.config.duration / self.config.time_step)
-        next_snapshot = self.config.snapshot_interval
-
+        
         for step in range(n_steps):
             t = step * self.config.time_step
             self.network.time = t
             
-            # 1. Mobility
+            # 1. Mobility step
             self.mobility.step(self.config.time_step)
             
-            # 2. Links
+            # 2. Network update
             old_edges = set(self.network.graph.edges())
             self.network.update_links()
             new_edges = set(self.network.graph.edges())
             
-            # 3. Protocol events
-            broken_edges = old_edges - new_edges
-            newly_formed = new_edges - old_edges
-            changed = list(broken_edges) + list(newly_formed)
-            
-            if broken_edges:
+            # 3. Detect topology changes
+            changed_edges = []
+            for e in old_edges - new_edges:
+                changed_edges.append((e[0], e[1], 'down'))
                 self.metrics.on_route_break()
+            for e in new_edges - old_edges:
+                changed_edges.append((e[0], e[1], 'up'))
                 
-            if changed:
-                self.protocol.on_link_change(changed)
+            if changed_edges:
+                self.protocol.on_link_change(changed_edges)
                 
+            # 4. Protocol periodic update
             self.protocol.on_timestep(t)
+            self.metrics.on_control(self.protocol.control_bytes_sent)
+            self.protocol.control_bytes_sent = 0 # Reset for current step counting
             
-            # 5. Generate packets
-            for i, flow in enumerate(self.flows):
-                if t >= self.next_packet_times[i]:
-                    src, dst = flow
-                    pkt = Packet(src, dst, t, size=self.config.packet_size)
+            # 5. Traffic generation (Poisson arrival)
+            for src, dst in self.flows:
+                if self.rng.random() < self.config.packet_rate * self.config.time_step:
+                    pkt = Packet(src=src, dst=dst, created_at=t, size=self.config.packet_size)
                     self.network.nodes[src].queue.append(pkt)
                     self.metrics.on_send(pkt, t)
                     
-                    # Next arrival
-                    inter_arrival = self.rng.exponential(1.0 / self.config.packet_rate)
-                    self.next_packet_times[i] = t + inter_arrival
-
-            # 6. Forward packets
+            # 6. Packet forwarding
             self._forward_all_packets(t)
             
-            # 7. Queue history
+            # 7. Node state updates
             for node in self.network.nodes.values():
                 node.update_queue_history()
                 
-            # 8. Metrics snapshot
-            if t >= next_snapshot:
-                snap = self.metrics.snapshot(t, self.config.snapshot_interval)
-                self.metrics.snapshots.append(snap)
-                if self.on_snapshot:
-                    self.on_snapshot(t, snap)
-                next_snapshot += self.config.snapshot_interval
-                
-        # Final snapshot at end
-        snap = self.metrics.snapshot(self.config.duration, self.config.snapshot_interval)
-        self.metrics.snapshots.append(snap)
-        if self.on_snapshot:
-            self.on_snapshot(self.config.duration, snap)
-            
+            # 8. Snapshots
+            if step % int(self.config.snapshot_interval / self.config.time_step) == 0:
+                snap = self.metrics.snapshot(t, window=self.config.snapshot_interval)
+                if self.on_snapshot_cb:
+                    self.on_snapshot_cb(t, snap)
+                    
         return self.metrics
 
     def _forward_all_packets(self, t: float):
-        # Gather all current queues to process (to avoid processing newly arrived packets in same timestep)
-        to_process = {}
-        for nid, node in self.network.nodes.items():
-            to_process[nid] = list(node.queue)
-            node.queue.clear()
+        """Simulates packet transmission across the network."""
+        # We'll use a copy of the nodes' queues to avoid issues during modification
+        for node_id, node in self.network.nodes.items():
+            if not node.queue:
+                continue
+                
+            # In a single time step, a node can process a limited number of packets
+            # based on bandwidth. For simplicity, we process a reasonable amount.
+            packets_to_process = node.queue[:]
+            node.queue = []
             
-        for nid, queue in to_process.items():
-            node = self.network.nodes[nid]
-            for pkt in queue:
-                if pkt.hop_count >= pkt.ttl:
-                    pkt.dropped = True
-                    pkt.drop_reason = "TTL"
-                    self.metrics.on_drop(pkt, t, "TTL")
+            for pkt in packets_to_process:
+                if pkt.dst == node_id:
+                    # Packet delivered!
+                    pkt.delivered = True
+                    pkt.delivered_at = t
+                    self.metrics.on_deliver(pkt, t)
+                    if hasattr(self.protocol, 'on_packet_delivered'):
+                        self.protocol.on_packet_delivered(pkt)
+                    continue
+                    
+                if pkt.ttl <= 0:
+                    self.metrics.on_drop(pkt, t, "TTL Expired")
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
                     continue
                     
-                next_hop = self.protocol.get_next_hop(nid, pkt)
+                next_hop = self.protocol.get_next_hop(node_id, pkt)
                 
-                if next_hop == -1:
-                    # Dropped or held
-                    # Basic approach: just drop if no route
-                    pkt.dropped = True
-                    pkt.drop_reason = "NoRoute"
-                    self.metrics.on_drop(pkt, t, "NoRoute")
-                    continue
-                    
-                if next_hop == pkt.dst:
-                    # Delivered
-                    pkt.delivered = True
-                    pkt.delivered_at = t
+                if next_hop != -1 and next_hop in self.network.get_neighbors(node_id):
+                    # Transmit
                     pkt.hop_count += 1
-                    pkt.route.append(next_hop)
-                    self.metrics.on_deliver(pkt, t)
-                    if hasattr(self.protocol, 'on_packet_delivered'):
-                        self.protocol.on_packet_delivered(pkt, t)
+                    pkt.ttl -= 1
+                    pkt.route.append(node_id)
+                    self.network.nodes[next_hop].queue.append(pkt)
+                    # Energy depletion
+                    node.energy -= node.energy_cost_to_forward()
+                    self.metrics.energy_consumed += node.energy_cost_to_forward()
                 else:
-                    # Forwarded
-                    if next_hop in self.network.nodes:
-                        cost = node.energy_cost_to_forward()
-                        node.energy -= cost
-                        self.metrics.energy_consumed += cost
-                        pkt.hop_count += 1
-                        pkt.route.append(next_hop)
-                        self.network.nodes[next_hop].queue.append(pkt)
+                    # No route or link break
+                    if next_hop == -1:
+                        # Re-queue for next step (limited buffer)
+                        if len(node.queue) < 100:
+                            node.queue.append(pkt)
+                        else:
+                            self.metrics.on_drop(pkt, t, "Queue Overflow")
+                            if hasattr(self.protocol, 'on_packet_dropped'):
+                                self.protocol.on_packet_dropped(pkt)
                     else:
-                        pkt.dropped = True
-                        self.metrics.on_drop(pkt, t, "InvalidHop")
-        
-        # Account for control overhead per timestep
-        if self.protocol.control_bytes_sent > 0:
-            self.metrics.on_control(self.protocol.control_bytes_sent)
-            self.protocol.control_bytes_sent = 0 # Reset counter after logging
+                        self.metrics.on_drop(pkt, t, "No Route")
+                        if hasattr(self.protocol, 'on_packet_dropped'):
+                            self.protocol.on_packet_dropped(pkt)
 
     def get_topology_for_dashboard(self) -> dict:
         return self.network.topology_snapshot()

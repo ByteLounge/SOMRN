@@ -1,152 +1,135 @@
-from dash import Dash, html, dcc
-import plotly.graph_objects as go
+import dash
+from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
+import plotly.graph_objs as go
 import threading
+import time
+from typing import Dict, List, Optional
 
-app = Dash(__name__)
-
-# Shared state between simulation and dashboard
+# Shared state for the dashboard
 class DashboardState:
     def __init__(self):
         self.lock = threading.Lock()
-        self.network = None
-        self.metrics_history = []
-        self.time = 0.0
+        self.topology = {'nodes': [], 'edges': []}
+        self.metrics_history: List[dict] = []
+        self.current_time = 0.0
         self.protocol_name = ""
-        self.baseline_stats = {} # Optional
+        self.q_stats = {'mean': 0, 'max': 0, 'min': 0}
 
 state = DashboardState()
 
-def update_state(network_snap, metrics_history, t, protocol_name):
+def update_state(network, metrics_collector, t, protocol_name):
     with state.lock:
-        state.network = network_snap
-        state.metrics_history = list(metrics_history)
-        state.time = t
+        state.topology = network.topology_snapshot()
+        if metrics_collector.snapshots:
+            state.metrics_history = [vars(s) for s in metrics_collector.snapshots]
+        state.current_time = t
         state.protocol_name = protocol_name
+        if hasattr(network, 'protocol') and hasattr(network.protocol, 'get_qtable_stats'):
+             state.q_stats = network.protocol.get_qtable_stats()
+
+app = dash.Dash(__name__)
 
 app.layout = html.Div([
-    html.H1("Wireless Mesh Network Simulation Dashboard"),
-    html.Div(id='protocol-info', style={'fontSize': 20, 'marginBottom': 20}),
+    html.H1(f"Wireless Mesh Network Live Dashboard"),
+    html.Div(id='protocol-info', style={'fontSize': 24, 'marginBottom': 20}),
     
     html.Div([
         html.Div([
-            dcc.Graph(id='topology-graph', animate=False)
-        ], style={'width': '50%', 'display': 'inline-block'}),
+            html.H3("Network Topology"),
+            dcc.Graph(id='topology-graph', style={'height': '600px'})
+        ], style={'width': '60%', 'display': 'inline-block'}),
         
         html.Div([
-            dcc.Graph(id='metrics-graph', animate=False)
-        ], style={'width': '50%', 'display': 'inline-block'})
+            html.H3("Real-time Metrics"),
+            dcc.Graph(id='metrics-chart', style={'height': '300px'}),
+            dcc.Graph(id='throughput-chart', style={'height': '300px'})
+        ], style={'width': '38%', 'display': 'inline-block', 'float': 'right'})
     ]),
     
-    dcc.Interval(
-        id='interval-component',
-        interval=1000, # in milliseconds
-        n_intervals=0
-    )
+    html.Div([
+        html.H3("Q-Learning Stats (if CPQR)"),
+        html.Div(id='q-stats-display')
+    ]),
+    
+    dcc.Interval(id='interval-component', interval=1000, n_intervals=0)
 ])
 
 @app.callback(
-    Output('protocol-info', 'children'),
-    Input('interval-component', 'n_intervals')
+    [Output('topology-graph', 'figure'),
+     Output('metrics-chart', 'figure'),
+     Output('throughput-chart', 'figure'),
+     Output('protocol-info', 'children'),
+     Output('q-stats-display', 'children')],
+    [Input('interval-component', 'n_intervals')]
 )
-def update_info(n):
+def update_charts(n):
     with state.lock:
-        return f"Protocol: {state.protocol_name} | Time: {state.time:.1f}s"
-
-@app.callback(
-    Output('topology-graph', 'figure'),
-    Input('interval-component', 'n_intervals')
-)
-def update_topology(n):
-    with state.lock:
-        net = state.network
-        if not net:
-            return go.Figure()
-
-    nodes = net['nodes']
-    edges = net['edges']
-    
-    node_x = [n['x'] for n in nodes]
-    node_y = [n['y'] for n in nodes]
-    node_text = [f"Node {n['id']}" for n in nodes]
-    
-    edge_x = []
-    edge_y = []
-    node_pos = {n['id']: (n['x'], n['y']) for n in nodes}
-    for e in edges:
-        u, v = e['source'], e['target']
-        x0, y0 = node_pos[u]
-        x1, y1 = node_pos[v]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
+        # 1. Topology Figure
+        node_x = [n['x'] for n in state.topology['nodes']]
+        node_y = [n['y'] for n in state.topology['nodes']]
         
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#888'),
-        hoverinfo='none',
-        mode='lines'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        text=[str(n['id']) for n in nodes],
-        textposition="top center",
-        marker=dict(
-            showscale=False,
-            color='blue',
-            size=10,
-            line_width=2
-        ),
-        hovertext=node_text
-    ))
-    
-    fig.update_layout(
-        title="Live Topology",
-        showlegend=False,
-        hovermode='closest',
-        margin=dict(b=0,l=0,r=0,t=40),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-    )
-    return fig
-
-@app.callback(
-    Output('metrics-graph', 'figure'),
-    Input('interval-component', 'n_intervals')
-)
-def update_metrics(n):
-    with state.lock:
-        history = list(state.metrics_history)
+        edge_traces = []
+        for edge in state.topology['edges']:
+            source = next(n for n in state.topology['nodes'] if n['id'] == edge['source'])
+            target = next(n for n in state.topology['nodes'] if n['id'] == edge['target'])
+            
+            # Color by quality (Red to Green)
+            q = edge['quality']
+            color = f'rgb({int(255*(1-q))}, {int(255*q)}, 0)'
+            
+            trace = go.Scatter(
+                x=[source['x'], target['x'], None],
+                y=[source['y'], target['y'], None],
+                line=dict(width=2, color=color),
+                hoverinfo='none',
+                mode='lines'
+            )
+            edge_traces.append(trace)
+            
+        node_trace = go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers+text',
+            text=[str(n['id']) for n in state.topology['nodes']],
+            textposition="top center",
+            marker=dict(size=15, color='royalblue', line_width=2)
+        )
         
-    if not history:
-        return go.Figure()
-        
-    times = [s.time for s in history]
-    pdrs = [s.pdr for s in history]
-    delays = [s.avg_delay for s in history]
-    
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=times, y=pdrs, name='PDR', mode='lines+markers'))
-    fig.add_trace(go.Scatter(x=times, y=delays, name='Avg Delay (s)', mode='lines+markers', yaxis='y2'))
-    
-    fig.update_layout(
-        title="Real-time Metrics",
-        xaxis_title="Time (s)",
-        yaxis_title="PDR",
-        yaxis2=dict(
-            title="Delay (s)",
-            overlaying="y",
-            side="right"
-        ),
-        margin=dict(b=40,l=40,r=40,t=40)
-    )
-    return fig
+        topo_fig = go.Figure(data=edge_traces + [node_trace],
+                             layout=go.Layout(
+                                 showlegend=False,
+                                 hovermode='closest',
+                                 margin=dict(b=0,l=0,r=0,t=0),
+                                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                             ))
 
-def run(port=8050):
-    # Suppress dash output
-    import logging
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
-    app.run_server(debug=False, port=port, host='0.0.0.0')
+        # 2. Metrics Figure
+        times = [m['time'] for m in state.metrics_history]
+        pdrs = [m['pdr'] for m in state.metrics_history]
+        delays = [m['avg_delay'] for m in state.metrics_history]
+        
+        metrics_fig = go.Figure()
+        metrics_fig.add_trace(go.Scatter(x=times, y=pdrs, name='PDR', yaxis='y1'))
+        metrics_fig.add_trace(go.Scatter(x=times, y=delays, name='Avg Delay (s)', yaxis='y2'))
+        
+        metrics_fig.update_layout(
+            title="PDR and Delay",
+            yaxis=dict(title="PDR", range=[0, 1]),
+            yaxis2=dict(title="Delay (s)", overlaying='y', side='right'),
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        
+        # 3. Throughput Figure
+        tput = [m['throughput'] for m in state.metrics_history]
+        tput_fig = go.Figure(data=[go.Scatter(x=times, y=tput, fill='tozeroy')])
+        tput_fig.update_layout(title="Throughput (Bytes/s)", margin=dict(l=40, r=40, t=40, b=40))
+        
+        info = f"Protocol: {state.protocol_name} | Time: {state.current_time:.1f}s"
+        
+        q_info = f"Mean Q: {state.q_stats['mean']:.2f} | Max Q: {state.q_stats['max']:.2f} | Min Q: {state.q_stats['min']:.2f}"
+        
+        return topo_fig, metrics_fig, tput_fig, info, q_info
+
+def run_dashboard(port=8050):
+    app.run_server(debug=False, port=port, use_reloader=False)

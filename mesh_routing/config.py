@@ -1,7 +1,9 @@
-import dataclasses
+from dataclasses import dataclass
+from typing import Dict, Any
 
-@dataclasses.dataclass
+@dataclass
 class SimConfig:
+    """Configuration parameters for the wireless mesh network simulation."""
     num_nodes: int = 30
     area_size: float = 500.0  # metres
     tx_range: float = 100.0
@@ -24,15 +26,38 @@ class SimConfig:
     lambda_ewma: float = 0.7  # queue EWMA smoothing factor
     snapshot_interval: float = 10.0
 
+
 class ScenarioPresets:
+    """Presets for different simulation scenarios."""
+    
     @staticmethod
     def static_low_load() -> SimConfig:
-        return SimConfig(max_speed=0.0, min_speed=0.0, packet_rate=0.5, num_flows=2)
+        """A scenario with stationary nodes and low traffic."""
+        return SimConfig(
+            max_speed=0.0,
+            min_speed=0.0,
+            packet_rate=1.0,
+            num_flows=2
+        )
 
     @staticmethod
     def mobile_high_load() -> SimConfig:
-        return SimConfig(max_speed=10.0, min_speed=2.0, packet_rate=5.0, num_flows=10)
+        """A scenario with moving nodes and high traffic."""
+        return SimConfig(
+            max_speed=10.0,
+            min_speed=2.0,
+            packet_rate=10.0,
+            num_flows=10
+        )
 
     @staticmethod
     def stress_test() -> SimConfig:
-        return SimConfig(num_nodes=50, max_speed=20.0, min_speed=5.0, packet_rate=10.0, num_flows=20)
+        """A stress test scenario with many fast-moving nodes and very high load."""
+        return SimConfig(
+            num_nodes=50,
+            max_speed=20.0,
+            min_speed=5.0,
+            packet_rate=20.0,
+            num_flows=20,
+            tx_range=80.0
+        )
