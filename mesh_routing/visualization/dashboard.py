@@ -197,6 +197,3 @@ def update_charts(n):
 
 def run_dashboard(port=8050):
     app.run_server(debug=False, port=port, use_reloader=False)
-
-def run_dashboard(port=8050):
-    app.run_server(debug=False, port=port, use_reloader=False)
