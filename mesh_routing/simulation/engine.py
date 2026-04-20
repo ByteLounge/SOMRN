@@ -107,6 +107,8 @@ class SimulationEngine:
                     pkt = Packet(src=src, dst=dst, created_at=self.next_packet_times[i], size=self.config.packet_size)
                     pkt.queued_at = self.next_packet_times[i]
                     self.network.nodes[src].queue.append(pkt)
+                    if len(self.network.nodes[src].queue) >= int(0.8 * self.config.max_queue_capacity):
+                        self.metrics.on_congestion_event()
                     self.metrics.on_send(pkt, self.next_packet_times[i], flow_id=i)
                     self.next_packet_times[i] += self.rng.exponential(1.0 / self.config.packet_rate)
             
@@ -255,6 +257,8 @@ class SimulationEngine:
                 for p in pkts:
                     if len(node.queue) < self.config.max_queue_capacity:
                         node.queue.append(p)
+                        if len(node.queue) >= int(0.8 * self.config.max_queue_capacity):
+                            self.metrics.on_congestion_event()
                     else:
                         self.metrics.on_drop(p, t, "Queue Overflow")
                         if hasattr(self.protocol, 'on_packet_dropped'):
@@ -266,3 +270,4 @@ class SimulationEngine:
         snap = self.network.topology_snapshot()
         snap['packets'] = self.packet_positions
         return snap
+n snap

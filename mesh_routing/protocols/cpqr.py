@@ -12,27 +12,29 @@ class CPQR(BaseProtocol):
     """
     LLT_THRESHOLD = 1.0 
     MAX_QUEUE_CAPACITY = 50
-    W_E = 0.1
-    EPSILON_START = 0.05 # Balanced exploration
-    EPSILON_DECAY = 0.001
-    EPSILON_FLOOR = 0.01
     BREAK_PENALTY: float = 100.0
     IN_FLIGHT_MAX: int = 10000
-    EPISODE_STEPS: int = 100
     
     def __init__(self, network: WirelessNetwork, config: SimConfig):
         super().__init__(network, config)
         self.net = network
         self.Q: Dict[int, Dict[int, Dict[int, float]]] = {}
+        self.q_confidence: Dict[int, Dict[int, int]] = {}  # node_id -> {dst: count}
         self.rng = np.random.default_rng(config.seed)
         self.in_flight: Dict[str, List[dict]] = {} 
         
-        self.epsilon = self.EPSILON_START
-        self._step_count = 0
+        self.epsilon = 0.3  # From prompt
+        self.epsilon_floor = 0.05
+        self.epsilon_decay = 0.995
+        
         self.alpha = 0.8 # Faster adaptation for high mobility
+        
+        self.reward_components = {'delay': 0.0, 'congestion': 0.0, 'link': 0.0, 'energy': 0.0, 'count': 0}
+        self.proactive_reroutes_count = 0
         
         for n in network.nodes:
             self.Q[n] = {}
+            self.q_confidence[n] = {}
             
     @property
     def name(self) -> str:
@@ -45,7 +47,7 @@ class CPQR(BaseProtocol):
     def INF(self): return self.BREAK_PENALTY
 
     def _get_q(self, node_id: int, dst: int, neighbor: int) -> float:
-        """Guards against phantom neighbors (Fix C)."""
+        """Guards against phantom neighbors."""
         if neighbor not in self.net.get_neighbors(node_id):
             return float('inf')
         try:
@@ -55,7 +57,17 @@ class CPQR(BaseProtocol):
 
     def _congestion_penalty(self, node_id: int) -> float:
         node = self.net.nodes[node_id]
-        return self.config.beta * (node.predicted_queue_depth(self.config.lambda_ewma) / self.MAX_QUEUE_CAPACITY)
+        return node.predicted_queue_depth(self.config.lambda_ewma) / self.MAX_QUEUE_CAPACITY
+        
+    def _link_lifetime_penalty(self, n1: int, n2: int) -> float:
+        link = self.net.get_link(n1, n2)
+        if link:
+            # Add small epsilon to prevent division by zero
+            llt = link.predicted_lifetime(self.config.time_step, self.config.noise_floor_dbm + 5)
+            if llt == float('inf'):
+                return 0.0
+            return 1.0 / max(llt, 0.1)
+        return float('inf')
 
     def _link_safe(self, n1: int, n2: int) -> bool:
         link = self.net.get_link(n1, n2)
@@ -64,7 +76,7 @@ class CPQR(BaseProtocol):
         return False
 
     def get_next_hop(self, node_id: int, packet) -> int:
-        """Rewritten Fix B: Epsilon-greedy with NetworkX fallback."""
+        """Epsilon-greedy with NetworkX fallback and cold-start fallback."""
         dst = packet.dst
         if node_id == dst:
             return dst
@@ -72,10 +84,19 @@ class CPQR(BaseProtocol):
         neighbors = self.net.get_neighbors(node_id)
         if not neighbors:
             return -1
-
+            
         viable = [n for n in neighbors if self._link_safe(node_id, n)]
         if not viable:
             viable = neighbors
+
+        # Cold-start fallback
+        confidence = self.q_confidence[node_id].get(dst, 0)
+        if confidence < self.config.min_explore_count:
+            path = self.net.shortest_path(node_id, dst)
+            if len(path) >= 2 and path[1] in neighbors:
+                chosen = path[1]
+                self._record_dispatch(packet, node_id, chosen, dst)
+                return chosen
 
         # Epsilon-greedy exploration
         if self.rng.random() < self.epsilon:
@@ -83,18 +104,27 @@ class CPQR(BaseProtocol):
             self._record_dispatch(packet, node_id, chosen, dst)
             return chosen
 
-        # Exploitation: pick neighbor with lowest Q + congestion penalty
+        # Exploitation: pick neighbor with lowest Q + congestion penalty + link penalty
         best_hop = -1
         best_score = float('inf')
+        best_q_hop = -1
+        best_q_score = float('inf')
+        
         for nb in viable:
             q_val = self._get_q(node_id, dst, nb)
-            cp = self._congestion_penalty(nb)
-            score = q_val + cp
+            # Find best Q purely based on Q-table to track proactive reroutes
+            if q_val < best_q_score:
+                best_q_score = q_val
+                best_q_hop = nb
+                
+            cp = self.config.beta * self._congestion_penalty(nb)
+            llp = self.config.gamma_link * self._link_lifetime_penalty(node_id, nb)
+            score = q_val + cp + llp
             if score < best_score:
                 best_score = score
                 best_hop = nb
 
-        # CRITICAL FALLBACK
+        # CRITICAL FALLBACK if all Q-values are inf
         if best_score >= self.BREAK_PENALTY or best_hop == -1:
             path = self.net.shortest_path(node_id, dst)
             if len(path) >= 2:
@@ -103,6 +133,10 @@ class CPQR(BaseProtocol):
                 best_hop = viable[0]
             else:
                 return -1
+
+        # Proactive reroute counter
+        if best_hop != best_q_hop and best_q_hop != -1 and best_hop != -1:
+            self.proactive_reroutes_count += 1
 
         self._record_dispatch(packet, node_id, best_hop, dst)
         return best_hop
@@ -129,6 +163,10 @@ class CPQR(BaseProtocol):
     def on_packet_delivered(self, packet: Packet, delivery_time: Optional[float] = None):
         """Update Q-values for ALL hops upon successful delivery."""
         if delivery_time is None: delivery_time = self.net.time
+        
+        # Epsilon decay
+        self.epsilon = max(self.epsilon_floor, self.epsilon * self.epsilon_decay)
+        
         if packet.packet_id in self.in_flight:
             hops = self.in_flight[packet.packet_id]
             for data in hops:
@@ -138,9 +176,21 @@ class CPQR(BaseProtocol):
                 delay = delivery_time - sent_at
                 self.control_bytes_sent += 16
                 energy_cost = packet.size / 1000.0
-                cp = self._congestion_penalty(v)
                 
-                reward = delay + self.config.beta * cp + self.W_E * energy_cost
+                cp = self.config.beta * self._congestion_penalty(v)
+                llp = self.config.gamma_link * self._link_lifetime_penalty(u, v)
+                if llp == float('inf'): llp = self.BREAK_PENALTY
+                
+                ep = self.config.w_e * energy_cost
+                
+                reward = delay + cp + llp + ep
+                
+                # Track components for dashboard
+                self.reward_components['delay'] += delay
+                self.reward_components['congestion'] += cp
+                self.reward_components['link'] += llp
+                self.reward_components['energy'] += ep
+                self.reward_components['count'] += 1
                 
                 if dst not in self.Q[u]: self.Q[u][dst] = {}
                 old_q = self.Q[u][dst].get(v, 10.0)
@@ -150,7 +200,12 @@ class CPQR(BaseProtocol):
                 min_q_next = min(next_qs) if next_qs else 0.0
                 
                 new_q = (1 - self.alpha) * old_q + self.alpha * (reward + self.config.gamma * min_q_next)
+                # Clip Q value
+                new_q = min(self.config.max_q_value, new_q)
                 self.Q[u][dst][v] = new_q
+                
+                # Update confidence
+                self.q_confidence[u][dst] = self.q_confidence[u].get(dst, 0) + 1
             
             del self.in_flight[packet.packet_id]
 
@@ -167,7 +222,7 @@ class CPQR(BaseProtocol):
             del self.in_flight[packet.packet_id]
 
     def on_link_change(self, changed_edges: list):
-        """Rewritten Fix C: Penalise with recoverable value. Unpack 3-tuples."""
+        """Penalise with recoverable value."""
         current_edges = set()
         for u, v in self.net.graph.edges():
             current_edges.add((min(u, v), max(u, v)))
@@ -192,10 +247,7 @@ class CPQR(BaseProtocol):
                             self.Q[src][dst][new_nb] = init_val
 
     def on_timestep(self, t: float):
-        """Decay epsilon every 100 timesteps."""
-        self._step_count = getattr(self, '_step_count', 0) + 1
-        if self._step_count % 100 == 0:
-            self.epsilon = max(self.EPSILON_FLOOR, self.epsilon - self.EPSILON_DECAY)
+        pass # Decaying is done per delivery now
 
     def get_qtable_stats(self) -> Dict:
         all_vals = []
