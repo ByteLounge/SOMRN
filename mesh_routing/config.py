@@ -22,11 +22,15 @@ class SimConfig:
     alpha: float = 0.1  # Q-learning rate
     gamma: float = 0.9  # discount factor
     epsilon: float = 0.1  # exploration rate
-    beta: float = 0.3  # congestion penalty weight
+    beta: float = 0.4  # congestion penalty weight
     lambda_ewma: float = 0.7  # queue EWMA smoothing factor
     snapshot_interval: float = 10.0
     max_queue_capacity: int = 50
     log_level: str = "INFO"
+    min_explore_count: int = 5 # Minimum exploration count before using Q-values
+    max_q_value: float = 1000.0 # Maximum Q-value to prevent divergence
+    gamma_link: float = 0.3 # Link lifetime penalty weight
+    w_e: float = 0.3 # Energy penalty weight
 
 
 class ScenarioPresets:

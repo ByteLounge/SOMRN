@@ -24,6 +24,9 @@ class MetricsSnapshot:
     energy_consumed: float
     avg_ral: float
     avg_link_util: float
+    congestion_events: int = 0
+    proactive_reroutes: int = 0
+    early_pdr: float = 0.0
     protocol_name: str = ""
     config_seed: int = 0
     num_nodes: int = 0
@@ -39,6 +42,9 @@ class MetricsCollector:
         self.control_bytes: int = 0
         self.data_bytes: int = 0
         self.route_breaks: int = 0
+        self.congestion_events: int = 0
+        self.proactive_reroutes: int = 0
+        self.early_pdr: float = 0.0
         self.snapshots: List[MetricsSnapshot] = []
         self.energy_consumed: float = 0.0
         self.flow_start_times: Dict[int, float] = {}
@@ -62,6 +68,12 @@ class MetricsCollector:
         self.data_bytes += packet.size
         if flow_id != -1 and flow_id not in self.flow_first_delivery:
             self.flow_first_delivery[flow_id] = t
+            
+        # Update early_pdr if within first 60 seconds
+        if t <= 60.0:
+            sent_early = [p for ts, p in self.sent if ts <= 60.0]
+            delivered_early = [p for ts, p in self.delivered if ts <= 60.0]
+            self.early_pdr = len(delivered_early) / len(sent_early) if sent_early else 0.0
 
     def on_drop(self, packet: Packet, t: float, reason: str = None):
         packet.dropped = True
@@ -73,6 +85,12 @@ class MetricsCollector:
 
     def on_route_break(self):
         self.route_breaks += 1
+        
+    def on_congestion_event(self):
+        self.congestion_events += 1
+        
+    def on_proactive_reroute(self):
+        self.proactive_reroutes += 1
         
     def record_active_nodes(self, active_nodes: Set[int]):
         self.active_nodes_history.append(active_nodes)
