@@ -1,0 +1,2 @@
+time,pdr,avg_delay,p95_delay,p99_delay,throughput_bps,control_overhead,avg_hop_count,route_breaks,packets_sent,packets_delivered,packets_dropped,energy_consumed,avg_ral,avg_link_util,protocol_name,config_seed,num_nodes,max_speed
+0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0,0,0,0,10000.0,0.0,0.0,CPQR,42,10,5.0
