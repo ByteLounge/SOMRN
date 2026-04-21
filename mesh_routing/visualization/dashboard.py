@@ -236,7 +236,7 @@ app.layout = html.Div([
             dcc.Tab(label='🖥️ Interactive Mode (Beginner)', value='interactive', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         ]),
         
-        dcc.Loading(id="loading-spinner", type="default", children=html.Div(id='tab-content', style={'marginTop': '20px'}))
+        html.Div(id='tab-content', style={'marginTop': '20px'})
     ], style=CONTENT_STYLE),
     
     dcc.Interval(id='interval-component', interval=500, n_intervals=0),
