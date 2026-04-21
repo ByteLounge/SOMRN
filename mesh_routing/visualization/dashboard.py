@@ -138,24 +138,29 @@ def get_research_sidebar():
         html.Hr(),
         
         html.Label("Protocol"),
-        dcc.Dropdown(id='protocol-dropdown',
+        html.Div(dcc.Dropdown(id='protocol-dropdown',
                      options=[{'label': 'AODV (Reactive)', 'value': 'AODV'},
                               {'label': 'OLSR (Proactive)', 'value': 'OLSR'},
                               {'label': 'CPQR (RL-based)', 'value': 'CPQR'}],
                      value='CPQR', clearable=False),
+                 title="Select the routing protocol to evaluate. CPQR uses AI to find the best paths."),
         
         html.Br(),
         html.Label("Number of Nodes"),
-        dcc.Slider(id='nodes-slider', min=10, max=100, step=5, value=30, marks={i: str(i) for i in range(10, 101, 20)}),
+        html.Div(dcc.Slider(id='nodes-slider', min=10, max=100, step=5, value=30, marks={i: str(i) for i in range(10, 101, 20)}),
+                 title="Adjust the total number of devices in the network."),
         
         html.Label("Max Speed (m/s)"),
-        dcc.Slider(id='speed-slider', min=0, max=30, step=1, value=5, marks={i: str(i) for i in range(0, 31, 5)}),
+        html.Div(dcc.Slider(id='speed-slider', min=0, max=30, step=1, value=5, marks={i: str(i) for i in range(0, 31, 5)}),
+                 title="Set how fast nodes move (0 = static, 30 = very fast)."),
         
         html.Label("Packet Rate (pkts/s)"),
-        dcc.Slider(id='load-slider', min=0.5, max=20, step=0.5, value=2, marks={i: str(i) for i in range(0, 21, 5)}),
+        html.Div(dcc.Slider(id='load-slider', min=0.5, max=20, step=0.5, value=2, marks={i: str(i) for i in range(0, 21, 5)}),
+                 title="Control the intensity of data traffic generated."),
 
         html.Label("Simulation Duration (s)"),
-        dcc.Input(id='duration-input', type='number', value=300, style={'width': '100%'}),
+        html.Div(dcc.Input(id='duration-input', type='number', value=300, style={'width': '100%'}),
+                 title="How long the simulation should run in seconds."),
         
         html.Br(), html.Br(),
         html.Button("START SIMULATION", id='restart-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white', 'border': 'none', 'padding': '10px'}),
@@ -179,14 +184,19 @@ def get_interactive_sidebar():
         html.Label("Add Device"),
         dcc.Dropdown(id='device-type-dropdown',
                      options=[{'label': v, 'value': k} for k, v in ICONS.items()],
-                     value='router', clearable=False),
-        html.Button("Add Device to Canvas", id='add-device-btn', style={'width': '100%', 'marginTop': '10px'}),
-        html.Button("Clear Canvas", id='clear-canvas-btn', style={'width': '100%', 'marginTop': '5px', 'backgroundColor': '#dc3545', 'color': 'white'}),
+                     value='router', clearable=False,
+                     title="Pick a network device type to add to your custom mesh."),
+        html.Button("Add Device to Canvas", id='add-device-btn', style={'width': '100%', 'marginTop': '10px'},
+                    title="Click to place the selected device at a random location on the map."),
+        html.Button("Clear Canvas", id='clear-canvas-btn', style={'width': '100%', 'marginTop': '5px', 'backgroundColor': '#dc3545', 'color': 'white'},
+                    title="Remove all devices and reset the network topology."),
         
         html.Hr(),
         html.Label("Quick Setup"),
-        dcc.Input(id='quick-nodes-input', type='number', min=5, max=20, value=10, style={'width': '100%'}),
-        html.Button("Auto-Place Nodes", id='auto-place-btn', style={'width': '100%', 'marginTop': '5px'}),
+        dcc.Input(id='quick-nodes-input', type='number', min=5, max=20, value=10, style={'width': '100%'},
+                  title="Specify how many nodes you want to place automatically."),
+        html.Button("Auto-Place Nodes", id='auto-place-btn', style={'width': '100%', 'marginTop': '5px'},
+                    title="Instantly create a circular network with the chosen number of devices."),
         
         html.Hr(),
         html.Label("Transmission Range (m)"),
@@ -194,11 +204,13 @@ def get_interactive_sidebar():
         
         html.Hr(),
         html.Label("📤 Source Node"),
-        dcc.Dropdown(id='source-dropdown', options=[], placeholder="Select Source"),
+        dcc.Dropdown(id='source-dropdown', options=[], placeholder="Select Source",
+                     title="This is where your data packet starts its journey — think of it as the sender's device."),
         
         html.Br(),
         html.Label("📥 Destination Node"),
-        dcc.Dropdown(id='destination-dropdown', options=[], placeholder="Select Destination"),
+        dcc.Dropdown(id='destination-dropdown', options=[], placeholder="Select Destination",
+                     title="This is where your data packet needs to go — the final recipient."),
         
         html.Hr(),
         html.Label("Choose Routing Protocol"),
@@ -206,7 +218,8 @@ def get_interactive_sidebar():
                        options=[{'label': '🧠 CPQR (AI-Powered)', 'value': 'CPQR'},
                                 {'label': '📡 AODV (Reactive)', 'value': 'AODV'},
                                 {'label': '🗺️ OLSR (Proactive)', 'value': 'OLSR'}],
-                       value='CPQR'),
+                       value='CPQR',
+                       title="CPQR uses Artificial Intelligence to learn which paths are least congested and most reliable."),
         
         html.Br(),
         html.Button("▶ START PACKET JOURNEY", id='start-journey-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white', 'fontWeight': 'bold', 'height': '50px'})
@@ -249,7 +262,8 @@ def render_tab_content(tab):
             html.Div([
                 html.Div([
                     html.H5("Logic Topology View (Packet Tracer Mode)", style={'textAlign': 'center'}),
-                    dcc.Graph(id='topology-graph', style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'}),
+                    dcc.Graph(id='topology-graph', style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'},
+                              title="The network map showing nodes and their links. Watch packets move hop-by-hop."),
                     html.Div(id='animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="eight columns"),
                 html.Div([
@@ -267,7 +281,8 @@ def render_tab_content(tab):
             html.H2("Interactive Packet Journey", style={'color': CISCO_BLUE}),
             html.Div([
                 html.Div([
-                    dcc.Graph(id='interactive-canvas', style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'}),
+                    dcc.Graph(id='interactive-canvas', style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'},
+                              title="Click 'Add Device' to build your network, then select a Source and Destination to start a packet journey."),
                     html.Div(id='interactive-animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="nine columns"),
                 html.Div([
