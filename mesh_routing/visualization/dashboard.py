@@ -235,7 +235,7 @@ app.layout = html.Div([
             dcc.Tab(label='📊 Research Mode (Advanced)', value='research', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
             dcc.Tab(label='🖥️ Interactive Mode (Beginner)', value='interactive', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         ]),
-        
+
         html.Div(id='tab-content', style={'marginTop': '20px'})
     ], style=CONTENT_STYLE),
     
@@ -243,6 +243,14 @@ app.layout = html.Div([
     dcc.Interval(id='interval-component-slow', interval=2000, n_intervals=0),
     dcc.Interval(id='animation-interval', interval=300, n_intervals=0)
 ])
+
+# Default empty figure to prevent flickering
+EMPTY_FIG = go.Figure(layout=go.Layout(
+    xaxis=dict(visible=False), yaxis=dict(visible=False),
+    plot_bgcolor='white', paper_bgcolor='white',
+    margin=dict(l=0, r=0, t=0, b=0),
+    uirevision='constant'
+))
 
 # --- TAB CONTENT RENDERING ---
 
@@ -262,16 +270,16 @@ def render_tab_content(tab):
             html.Div([
                 html.Div([
                     html.H5("Logic Topology View (Packet Tracer Mode)", style={'textAlign': 'center'}),
-                    html.Div(dcc.Graph(id='topology-graph', style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'}),
+                    html.Div(dcc.Graph(id='topology-graph', figure=EMPTY_FIG, style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'}),
                              title="The network map showing nodes and their links. Watch packets move hop-by-hop."),
                     html.Div(id='animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="eight columns"),
                 html.Div([
                     html.H5("Performance Metrics", style={'textAlign': 'center'}),
-                    dcc.Graph(id='metrics-chart', style={'height': '300px'}),
+                    dcc.Graph(id='metrics-chart', figure=EMPTY_FIG, style={'height': '300px'}),
                     html.Div(id='early-pdr-display', style={'textAlign': 'center', 'fontWeight': 'bold', 'color': CISCO_BLUE, 'marginBottom': '10px'}),
-                    dcc.Graph(id='throughput-chart', style={'height': '300px'}),
-                    dcc.Graph(id='reward-chart', style={'height': '300px'})
+                    dcc.Graph(id='throughput-chart', figure=EMPTY_FIG, style={'height': '300px'}),
+                    dcc.Graph(id='reward-chart', figure=EMPTY_FIG, style={'height': '300px'})
                 ], className="four columns")
             ], className="row")
         ])
@@ -281,7 +289,7 @@ def render_tab_content(tab):
             html.H2("Interactive Packet Journey", style={'color': CISCO_BLUE}),
             html.Div([
                 html.Div([
-                    html.Div(dcc.Graph(id='interactive-canvas', style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'}),
+                    html.Div(dcc.Graph(id='interactive-canvas', figure=EMPTY_FIG, style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'}),
                              title="Click 'Add Device' to build your network, then select a Source and Destination to start a packet journey."),
                     html.Div(id='interactive-animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="nine columns"),
