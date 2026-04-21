@@ -102,11 +102,36 @@ class WirelessNetwork:
     def topology_snapshot(self) -> Dict:
         """Returns a serializable snapshot of the current topology for the dashboard."""
         snapshot = {
-            'nodes': [{'id': n.id, 'x': n.x, 'y': n.y, 'energy': n.energy} for n in self.nodes.values()],
+            'nodes': [
+                {
+                    'id': n.id, 
+                    'x': n.x, 
+                    'y': n.y, 
+                    'energy': n.energy,
+                    'queue_depth_pct': len(n.queue) / self.config.max_queue_capacity,
+                    'queue_len': len(n.queue)
+                } for n in self.nodes.values()
+            ],
             'edges': []
         }
         for u, v in self.graph.edges():
             link = self.get_link(u, v)
             quality = link.quality if link else 0.0
-            snapshot['edges'].append({'source': u, 'target': v, 'quality': quality})
+            
+            # Add link prediction data
+            llt = float('inf')
+            if link:
+                llt = link.predicted_lifetime(self.config.time_step, self.config.noise_floor_dbm + 5)
+                
+            u_node = self.nodes[u]
+            v_node = self.nodes[v]
+            
+            snapshot['edges'].append({
+                'source': u, 
+                'target': v, 
+                'quality': quality,
+                'llt': llt,
+                'src_queue_pct': len(u_node.queue) / self.config.max_queue_capacity,
+                'tgt_queue_pct': len(v_node.queue) / self.config.max_queue_capacity
+            })
         return snapshot

@@ -60,6 +60,14 @@ class SimulationEngine:
         self._dead_nodes: set = set()
         self.WARMUP_PERIOD: float = 10.0
         self.time = 0.0
+        self.completed_routes = [] # List of recent completed routes
+        self.MAX_COMPLETED_ROUTES = 20
+
+    def get_last_packet_routes(self) -> List[dict]:
+        """Returns the last completed packet routes and clears the buffer."""
+        routes = self.completed_routes[:]
+        self.completed_routes = []
+        return routes
 
     def run(self, real_time: bool = False) -> MetricsCollector:
         """Runs the simulation for the configured duration."""
@@ -204,6 +212,19 @@ class SimulationEngine:
                     continue
 
                 if pkt.dst == node_id:
+                    # Record destination in route and store in completed_routes
+                    pkt.route.append(node_id)
+                    route_data = {
+                        "packet_id": pkt.packet_id,
+                        "protocol": self.protocol.name,
+                        "path": pkt.route[:],
+                        "timestamps": [t] * len(pkt.route), # Approximate timestamps
+                        "success": True
+                    }
+                    self.completed_routes.append(route_data)
+                    if len(self.completed_routes) > self.MAX_COMPLETED_ROUTES:
+                        self.completed_routes.pop(0)
+
                     # BUG 3 Fix A: on_packet_delivered
                     self.metrics.on_deliver(pkt, t, flow_id=getattr(pkt, 'flow_id', -1))
                     if hasattr(self.protocol, 'on_packet_delivered'):
