@@ -138,16 +138,23 @@ The SOMRN simulator is modular, written in Python 3.12, and divided into four pi
 
 ---
 
-## IX. VISUALIZATION: THE CISCO PACKET TRACER STYLE UI
-A major part of this project was making the complex AI decisions visible to humans. The dashboard features:
+## IX. VISUALIZATION: DUAL-MODE DASHBOARD AND CONTINUOUS ANIMATION
+A major part of this project was making complex AI decisions visible. The dashboard has been split into two distinct environments to cater to different users.
 
-1.  **The Logical Grid:** A 500m x 500m area where nodes move in real-time.
-2.  **Status Colors:** 
-    *   **Green Links:** High-quality, high-speed paths.
-    *   **Amber Links:** Weak signals, likely to break soon.
-    *   **Red Links:** Congested or failing links.
-3.  **Real-Time Analytics:** Graphs that show PDR and Latency updating every second. 
-4.  **Packet Animation:** Small black squares represent actual data. You can literally watch the AI choose to send a packet around a traffic jam.
+### 9.1 Research Mode (Advanced Analysis)
+This mode provides a high-fidelity view of the network state:
+*   **Intelligent Link Color-Coding:** Links dynamically change color based on congestion: **Green** (<30%), **Orange** (30-70%), and **Red** (>70%). **Dashed Red** lines indicate links predicted to break within 5 seconds based on RSSI trends.
+*   **Node Status Icons:** Every node displays a real-time status marker: 🟢 (Idle), 🟡 (Forwarding), or 🔴 (Congested).
+*   **Multi-Panel Analytics:** Synchronized charts for PDR, Throughput, Reward Breakdowns, and RL Convergence status.
+
+### 9.2 Interactive Mode (Beginner-Friendly)
+Inspired by Cisco Packet Tracer, this mode allows users to manually architect a network:
+*   **Device Iconography:** Nodes are represented by specialized icons (Routers, PCs, Laptops, Access Points) using Unicode and hexagonal/diamond marker shapes.
+*   **Manual Orchestration:** Users can place devices on a canvas, set Transmission Ranges, and designate specific **Source** and **Destination** pairs.
+*   **Plain-English Narration:** A "What's Happening?" panel provides step-by-step text explanations of the AI's routing choices (e.g., "Packet avoiding Node 3 due to high queue depth...").
+
+### 9.3 Continuous Hop-by-Hop Animation
+Unlike standard simulators that show disconnected packet movements, SOMRN implements **Continuous Path Tracking**. When a packet is sent, a single animated yellow dot traverses the *entire* route from source to destination in sequence. This allows the researcher to visually verify that CPQR is passing through the specific hops intended by the Q-table.
 
 ---
 
