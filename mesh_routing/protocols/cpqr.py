@@ -110,13 +110,14 @@ class CPQR(BaseProtocol):
         best_q_hop = -1
         best_q_score = float('inf')
         
-        for nb in viable:
+        for nb in neighbors:
             q_val = self._get_q(node_id, dst, nb)
-            # Find best Q purely based on Q-table to track proactive reroutes
             if q_val < best_q_score:
                 best_q_score = q_val
                 best_q_hop = nb
-                
+        
+        for nb in viable:
+            q_val = self._get_q(node_id, dst, nb)
             cp = self.config.beta * self._congestion_penalty(nb)
             llp = self.config.gamma_link * self._link_lifetime_penalty(node_id, nb)
             score = q_val + cp + llp

@@ -159,8 +159,9 @@ def test_cpqr_epsilon_decays_over_time():
     net = WirelessNetwork(config)
     cpqr = CPQR(net, config)
     initial_eps = cpqr.epsilon
-    for _ in range(cpqr.EPISODE_STEPS):
-        cpqr.on_timestep(0)
+    pkt = Packet(src=0, dst=1, created_at=0.0)
+    for _ in range(10):
+        cpqr.on_packet_delivered(pkt)
     assert cpqr.epsilon < initial_eps
 
 def test_cpqr_link_lifetime_inf_for_stable_link():

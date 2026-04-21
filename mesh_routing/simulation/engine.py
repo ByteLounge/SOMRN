@@ -270,4 +270,3 @@ class SimulationEngine:
         snap = self.network.topology_snapshot()
         snap['packets'] = self.packet_positions
         return snap
-n snap

@@ -25,6 +25,12 @@ class DashboardState:
         self.current_time = 0.0
         self.protocol_name = ""
         self.q_stats = {'mean': 0, 'max': 0, 'min': 0}
+        self.epsilon = 0.0
+        self.proactive_reroutes = 0
+        self.q_guided_pct = 0.0
+        self.reward_components = {'delay': 0.0, 'congestion': 0.0, 'link': 0.0, 'energy': 0.0, 'count': 0}
+        self.congestion_events = 0
+        self.early_pdr = 0.0
         self.finished = False
         self.config = SimConfig()
 
@@ -37,12 +43,23 @@ def update_topology(engine):
         state.current_time = engine.time
         if engine.protocol and hasattr(engine.protocol, 'get_qtable_stats'):
              state.q_stats = engine.protocol.get_qtable_stats()
+             state.epsilon = getattr(engine.protocol, 'epsilon', 0.0)
+             state.proactive_reroutes = getattr(engine.protocol, 'proactive_reroutes_count', 0)
+             
+             q_conf = getattr(engine.protocol, 'q_confidence', {})
+             nodes_in_q_mode = sum(1 for conf in q_conf.values() if any(c >= engine.config.min_explore_count for c in conf.values()))
+             total_active_nodes = len(q_conf)
+             state.q_guided_pct = (nodes_in_q_mode / total_active_nodes * 100) if total_active_nodes > 0 else 0.0
+             
+             state.reward_components = getattr(engine.protocol, 'reward_components', {}).copy()
 
 def update_metrics(engine):
     """Updates the metrics history on snapshot intervals."""
     with state.lock:
         state.metrics_history = [vars(s) for s in engine.metrics.snapshots]
         state.protocol_name = engine.protocol.name
+        state.congestion_events = getattr(engine.metrics, 'congestion_events', 0)
+        state.early_pdr = getattr(engine.metrics, 'early_pdr', 0.0)
 
 app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
 
@@ -104,6 +121,7 @@ app.layout = html.Div([
         html.Div(id='q-table-panel', children=[
             html.H6("Q-Learning Intelligence"),
             html.Div(id='q-stats-display', style={'fontSize': '12px'}),
+            html.Div(id='cpqr-intelligence-status', style={'fontSize': '12px', 'marginTop': '10px'}),
         ], style={'display': 'none'})
     ], style=SIDEBAR_STYLE),
 
@@ -125,11 +143,14 @@ app.layout = html.Div([
             html.Div([
                 html.H5("Performance Metrics", style={'textAlign': 'center'}),
                 dcc.Graph(id='metrics-chart', style={'height': '300px'}),
-                dcc.Graph(id='throughput-chart', style={'height': '300px'})
+                html.Div(id='early-pdr-display', style={'textAlign': 'center', 'fontWeight': 'bold', 'color': CISCO_BLUE, 'marginBottom': '10px'}),
+                dcc.Graph(id='throughput-chart', style={'height': '300px'}),
+                dcc.Graph(id='reward-chart', style={'height': '300px'})
             ], className="four columns")
         ], className="row"),
         
-        dcc.Interval(id='interval-component', interval=500, n_intervals=0) # Faster interval for UI response
+        dcc.Interval(id='interval-component', interval=500, n_intervals=0), # Faster interval for UI response
+        dcc.Interval(id='interval-component-slow', interval=2000, n_intervals=0) # 2-second interval for status
     ], style=CONTENT_STYLE)
 ])
 
@@ -185,6 +206,7 @@ def restart_sim(n_clicks, protocol, nodes, speed, load, duration):
 @app.callback(
     [Output('topology-graph', 'figure'), 
      Output('metrics-chart', 'figure'), 
+     Output('early-pdr-display', 'children'),
      Output('throughput-chart', 'figure'),
      Output('q-stats-display', 'children'),
      Output('status-banner', 'children'), 
@@ -195,7 +217,7 @@ def update_charts(n):
     with state.lock:
         nodes = state.topology.get('nodes', [])
         if not nodes:
-            return [dash.no_update]*6
+            return [dash.no_update]*7
             
         edge_traces = []
         for edge in state.topology.get('edges', []):
@@ -262,12 +284,53 @@ def update_charts(n):
         tput_fig.update_layout(title="Throughput (kbps)", margin=dict(t=30, b=30))
         
         q_info = f"Avg Q: {state.q_stats['mean']:.2f} | Range: {state.q_stats['min']:.2f}-{state.q_stats['max']:.2f}"
+        
+        early_pdr_text = f"Early PDR (first 60s): {state.early_pdr:.2%}" if state.early_pdr > 0 else "Early PDR (first 60s): N/A"
+        
         status = html.Span("● LIVE", style={'color': '#28a745'}) if not state.finished and times else html.Span("■ IDLE", style={'color': '#666'})
         if state.finished: status = html.Span("✓ COMPLETE", style={'color': CISCO_BLUE})
         
         q_style = {'display': 'block'} if state.protocol_name == 'CPQR' else {'display': 'none'}
         
-        return topo_fig, metrics_fig, tput_fig, q_info, status, q_style
+        return topo_fig, metrics_fig, early_pdr_text, tput_fig, q_info, status, q_style
+
+@app.callback(
+    [Output('cpqr-intelligence-status', 'children'),
+     Output('reward-chart', 'figure')],
+    [Input('interval-component-slow', 'n_intervals')]
+)
+def update_cpqr_status(n):
+    with state.lock:
+        if state.protocol_name != 'CPQR':
+            return dash.no_update, dash.no_update
+            
+        status_table = html.Table([
+            html.Tr([html.Th("Metric"), html.Th("Value")]),
+            html.Tr([html.Td("ε_explore"), html.Td(f"{state.epsilon:.4f}")]),
+            html.Tr([html.Td("Q-Guided Mode"), html.Td(f"{state.q_guided_pct:.1f}%")]),
+            html.Tr([html.Td("Proactive Reroutes"), html.Td(f"{state.proactive_reroutes}")]),
+            html.Tr([html.Td("Congestion Events"), html.Td(f"{state.congestion_events}")])
+        ], style={'width': '100%', 'border': '1px solid #ccc', 'textAlign': 'left'})
+        
+        # Reward chart
+        rc = state.reward_components
+        count = rc.get('count', 1)
+        if count == 0: count = 1
+        
+        avg_delay = rc.get('delay', 0) / count
+        avg_congestion = rc.get('congestion', 0) / count
+        avg_link = rc.get('link', 0) / count
+        avg_energy = rc.get('energy', 0) / count
+        
+        reward_fig = go.Figure(data=[
+            go.Bar(name='Delay', x=['Reward Components'], y=[avg_delay]),
+            go.Bar(name='Congestion', x=['Reward Components'], y=[avg_congestion]),
+            go.Bar(name='Link Lifetime', x=['Reward Components'], y=[avg_link]),
+            go.Bar(name='Energy', x=['Reward Components'], y=[avg_energy])
+        ])
+        reward_fig.update_layout(barmode='stack', title="Avg Reward Components", margin=dict(t=30, b=30))
+        
+        return status_table, reward_fig
 
 @app.callback(Output('export-status', 'children'), Input('export-btn', 'n_clicks'), prevent_initial_call=True)
 def export_metrics(n_clicks):
