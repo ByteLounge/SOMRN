@@ -262,8 +262,8 @@ def render_tab_content(tab):
             html.Div([
                 html.Div([
                     html.H5("Logic Topology View (Packet Tracer Mode)", style={'textAlign': 'center'}),
-                    dcc.Graph(id='topology-graph', style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'},
-                              title="The network map showing nodes and their links. Watch packets move hop-by-hop."),
+                    html.Div(dcc.Graph(id='topology-graph', style={'height': '600px', 'border': f'1px solid {GRID_COLOR}'}),
+                             title="The network map showing nodes and their links. Watch packets move hop-by-hop."),
                     html.Div(id='animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="eight columns"),
                 html.Div([
@@ -281,8 +281,8 @@ def render_tab_content(tab):
             html.H2("Interactive Packet Journey", style={'color': CISCO_BLUE}),
             html.Div([
                 html.Div([
-                    dcc.Graph(id='interactive-canvas', style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'},
-                              title="Click 'Add Device' to build your network, then select a Source and Destination to start a packet journey."),
+                    html.Div(dcc.Graph(id='interactive-canvas', style={'height': '600px', 'border': f'1px solid {CISCO_BLUE}'}),
+                             title="Click 'Add Device' to build your network, then select a Source and Destination to start a packet journey."),
                     html.Div(id='interactive-animation-status', style={'textAlign': 'center', 'fontSize': '14px', 'marginTop': '10px', 'fontWeight': 'bold'})
                 ], className="nine columns"),
                 html.Div([
@@ -328,6 +328,10 @@ def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ""
     
     with state.lock:
+        # PERFORMANCE: Only update on interval if an animation is actually happening
+        if trigger == 'animation-interval' and not state.current_animating_path:
+            return [dash.no_update]*4
+
         if trigger == 'clear-canvas-btn':
             state.interactive_nodes = []
             state.interactive_src = None
@@ -358,6 +362,10 @@ def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n
         state.interactive_dst = dst
         state.interactive_tx_range = tx_range
         
+        # If no nodes, don't return an empty coordinate system unless it's a reset
+        if not state.interactive_nodes and trigger not in ['clear-canvas-btn', 'auto-place-btn']:
+             return [dash.no_update]*4
+
         # Build Figure
         fig = go.Figure()
         
