@@ -24,10 +24,14 @@ The simulator provides a comprehensive framework for comparing CPQR against indu
 The simulator includes a high-performance web dashboard built with Dash and Plotly.
 
 **Capabilities:**
+- **Two Distinct Modes:** Switch between **Research Mode (Advanced)** for detailed metrics and **Interactive Mode (Beginner)** for manual device placement.
+- **Interactive Device Placement:** Manually place Routers, PCs, Laptops, and Access Points on a canvas and test specific source-to-destination routes.
+- **Enhanced Hop-by-Hop Animation:** Watch packets traverse the exact path selected by the RL agent, with visual feedback at each intermediate node.
+- **Intelligent Link Visualization:** Links are color-coded by congestion level (green/orange/red) and predicted lifetime (dashed for failing links).
 - **Dynamic Configuration:** Adjust Node Count (10-100), Speed (0-30m/s), and Traffic Load via sidebar sliders.
-- **Logic Topology View:** Real-time rendering of nodes, active links (color-coded by quality), and individual packet transmissions.
 - **Interactive Metrics:** Live-updating charts for PDR and Throughput (kbps).
-- **Q-Learning Intelligence:** Live display of RL agent convergence and Q-table ranges.
+- **CPQR Intelligence Status:** Track exploration rate, Q-guided mode percentage, congestion events, and proactive reroutes.
+- **Reward Component Breakdown:** Real-time visualization of delay, congestion, link lifetime, and energy penalty contributions.
 
 **To Launch:**
 ```bash
@@ -35,6 +39,16 @@ cd mesh_routing
 python main.py --live
 ```
 Access at: `http://localhost:8050`
+
+### 🖥️ Interactive Mode (Beginner-Friendly)
+The new Interactive Mode allows users to explore mesh networking without prior knowledge.
+1. Switch to the **Interactive Mode** tab.
+2. Click "Add Device" to place routers and PCs.
+3. Select a **Source** and **Destination**.
+4. Press **Start Packet Journey** to see CPQR find the best path.
+5. Follow the **What's Happening?** panel for a plain-English explanation of the AI's decisions.
+
+[Interactive Mode Screenshot — add after running]
 
 ## 🧠 Technical Protocol: CPQR
 
