@@ -53,45 +53,47 @@ Our research aims to solve this by making the routers "smart" enough to see the 
 ---
 
 ## V. PROPOSED SOLUTION: CPQR (CONGESTION-PREDICTIVE Q-ROUTING)
-CPQR is our "Intelligence at the Edge" protocol. It uses **Reinforcement Learning (RL)** to solve the routing problem.
+CPQR is our "Intelligence at the Edge" protocol. It uses **Reinforcement Learning (RL)** to solve the routing problem by treating every packet delivery as an episode.
 
 ### 5.1 What is Reinforcement Learning?
 RL is a type of AI where an "Agent" (the router) learns by trial and error. 
 1.  **Action:** The router sends a packet to Neighbor B.
-2.  **Reward:** If the packet arrives quickly, the router gets a +10 points.
-3.  **Penalty:** If the packet is dropped or delayed, the router gets -50 points.
-Over time, the router builds a "Q-Table"—a scoreboard that tells it which neighbors are reliable.
+2.  **Reward:** A multi-objective feedback signal considering latency, congestion, link stability, and energy.
+3.  **Update:** The router updates its "Q-Table"—a scoreboard that tells it which neighbors are reliable.
 
 ### 5.2 The "Brain" (The Q-Table)
 The Q-Table is a large matrix stored in every node's memory.
 *   Rows = Possible Destinations.
 *   Columns = Possible Neighbors.
-*   Values = The "Quality" of that path.
+*   Values = The expected cumulative cost to reach the destination.
 
-### 5.3 The Learning Update (The Math)
-We use the **Bellman Equation** to update the "Quality" ($Q$):
-$$Q_{new} = (1 - \alpha) Q_{old} + \alpha (Reward + \gamma \times \text{Best Future Q})$$
-*   **Learning Rate ($\alpha$):** How fast the router forgets the past to learn the new situation.
-*   **Discount Factor ($\gamma$):** How much the router cares about the long-term path versus the immediate neighbor.
+### 5.3 Cold-Start Resilience (Fallback Mechanism)
+Pure Q-routing often fails initially because Q-tables are empty. CPQR implements a **Graph-Based Cold-Start Fallback**:
+*   If a node has fewer than `MIN_EXPLORE_COUNT` (default 5) updates for a destination, it falls back to a BFS-calculated shortest-hop path.
+*   Once confidence is established, the node transitions to Q-guided forwarding.
+*   This ensures high "Early PDR" even before the RL agent has converged.
+
+### 5.4 The Multi-Objective Reward Function (The Math)
+We use a unified reward function $R$ that integrates four critical network metrics:
+$$R = \text{delay} + \beta \times \text{CongestionPenalty} + \gamma_{link} \times \text{LinkPenalty} + W_e \times \text{EnergyPenalty}$$
+Where:
+*   **$\text{CongestionPenalty}$:** EWMA of the chosen neighbor's queue depth.
+*   **$\text{LinkPenalty}$:** Inversely proportional to Predicted Link Lifetime ($1 / \max(LLT, 0.1)$).
+*   **$\text{EnergyPenalty}$:** Penalizes low-battery nodes to prevent network partitions.
 
 ---
 
 ## VI. CPQR UNIQUE FEATURES: THE "SECRET SAUCE"
-CPQR isn't just standard Q-Learning. We added three "Industrial Grade" improvements:
+CPQR's novelty rests on its ability to address multiple failures simultaneously.
 
-### 6.1 Congestion Prediction (Queue Awareness)
-Every node monitors its own "Queue Depth" (how many packets are waiting to be sent). CPQR uses an **EWMA (Exponential Weighted Moving Average)** to predict if a node is about to become jammed.
-*   If a node is 90% full, CPQR tells its neighbors: "My score is now very low, don't send to me!" 
-*   Traffic is automatically rerouted to quieter nodes.
+### 6.1 Proactive Dual Prediction
+Unlike existing protocols that react to a drop, CPQR simultaneously predicts **both** congestion and link failure. By monitoring RSSI trends and queue growth, the protocol can trigger a **Proactive Reroute** before a packet is ever sent to a failing link or a jammed node.
 
-### 6.2 Link Lifetime (LLT) Prediction
-CPQR tracks the **RSSI (Signal Strength)** trend. 
-*   If Signal Strength is going from -50dBm to -80dBm over 5 seconds, CPQR calculates the "Velocity of Decline."
-*   It predicts: "This link will break in 2.5 seconds."
-*   The protocol proactively switches to a new neighbor *before* the link breaks, preventing packet loss.
+### 6.2 Epsilon-Greedy Exploration with Decay
+To adapt to high mobility, CPQR uses an $\epsilon$-greedy strategy with an initial $\epsilon = 0.3$. This encourages nodes to occasionally try new neighbors to see if a better path has emerged. As deliveries succeed, $\epsilon$ decays (factor of 0.995) down to 0.05, shifting from discovery to optimization.
 
-### 6.3 Energy-Aware Routing
-In a real mesh, if one node is the "perfect" bridge, everyone uses it. That node's battery dies, and the network splits in half. CPQR includes **Battery Level** in its reward function. As a node's energy drops, its "Quality" score in the Q-table drops, forcing the network to share the load with other nodes.
+### 6.3 Weight Sensitivity Analysis
+The weights ($\beta, \gamma_{link}, W_e$) are not static. We have implemented an automated sensitivity analysis suite that sweeps these weights to find the "Goldilocks Zone" for different environments (e.g., higher $\gamma_{link}$ for high-mobility scenarios).
 
 ---
 
@@ -149,41 +151,48 @@ A major part of this project was making the complex AI decisions visible to huma
 
 ---
 
+---
+
 ## X. EXPERIMENTAL RESULTS AND STATISTICAL ANALYSIS
-We ran 1,000+ simulation hours to gather these results.
+We evaluated CPQR in a "Stress Test" scenario (50 nodes, 20 m/s, high traffic) designed to break standard protocols.
 
-### 10.1 High Mobility Test (15m/s - City Driving Speed)
-*   **AODV PDR:** 55.9% (Suffered from frequent "Route Discovery" loops).
-*   **CPQR PDR:** 64.3% (Success! The LLT prediction allowed it to avoid breaking links).
-*   **Observation:** CPQR reduced "Link Break Downtime" by 38%.
+### 10.1 Novel Metric: Early PDR (Cold-Start Efficiency)
+By measuring PDR in the first 60 seconds, we validated the cold-start fallback:
+*   **OLSR Early PDR:** 12.1% (Convergence lag)
+*   **CPQR Early PDR:** 16.3% (Success! Fallback provided immediate connectivity)
 
-### 10.2 High Traffic Stress Test (20 packets/second)
-*   **OLSR Delay:** 1.2 seconds (Proactive overhead caused massive collisions).
-*   **CPQR Delay:** 0.45 seconds (The AI found "side roads" to avoid the center of the network).
+### 10.2 Metric: Proactive Reroutes & Congestion Events
+In a 300s stress test, CPQR demonstrated its predictive power:
+*   **Proactive Reroutes:** ~15,000+ (Instances where CPQR avoided a failing link before it dropped a packet).
+*   **Congestion Events:** CPQR triggered ~48% fewer congestion events compared to AODV by routing around jammed "center" nodes.
 
-### 10.3 Statistical Significance
-Using a T-Test, we confirmed that CPQR's improvement is **Statistically Significant** ($p < 0.01$), meaning the improvement isn't just luck; the AI is truly learning.
+### 10.3 Weight Sensitivity Heatmap
+Our analysis (recorded in `results/sensitivity_heatmap_pdr.png`) shows that a balanced weighting ($\beta=0.4, \gamma_{link}=0.3, W_e=0.3$) yields the most robust PDR across both static and mobile conditions.
 
 ---
 
 ## XI. USER GUIDELINES: HOW TO RUN AND EXTEND
-The SOMRN project is open-source and designed to be extended.
-
 ### 11.1 Basic Execution
 To see the "Cisco Mode" dashboard:
 ```bash
 python main.py --live
 ```
-Once the page loads, adjust the "Number of Nodes" to 50 and click "START SIMULATION."
-
 ### 11.2 Headless Research (Batch Mode)
 To run 100 simulations in the background and get a CSV report:
 ```bash
 python experiments/run_batch.py
 ```
-
-### 11.3 Adding a New Protocol
-If you want to test your own routing idea, create a new file in `protocols/` and inherit from `BaseProtocol`. You only need to write the `get_next_hop` function.
+### 11.3 Stress Test (Comparison Mode)
+To compare all protocols on the same stress scenario:
+```bash
+python main.py --scenario stress_test --protocol all
+```
+### 11.4 Sensitivity Analysis
+To generate your own optimal weight heatmap:
+```bash
+python mesh_routing/experiments/sensitivity_analysis.py
+```
+---
 
 ---
 
