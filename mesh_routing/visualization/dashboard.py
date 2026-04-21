@@ -366,10 +366,18 @@ def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n
         # Draw Nodes
         for node in state.interactive_nodes:
             color = 'blue'
-            if str(node['id']) == str(src): color = 'green'
-            if str(node['id']) == str(dst): color = 'red'
+            is_src = str(node['id']) == str(src)
+            is_dst = str(node['id']) == str(dst)
+            if is_src: color = 'green'
+            if is_dst: color = 'red'
             
-            # If animating
+            node_label = f"Node {node['id']}<br>{UNICODE_ICONS[node['type']]}"
+            
+            # If animating and at destination, show checkmark
+            if is_dst and state.current_animating_path == [] and state.narration == "✅ Journey complete!":
+                 node_label += " ✓"
+            
+            # Highlight if animating
             if state.current_animating_path and state.animating_hop_idx < len(state.current_animating_path):
                 if node['id'] == state.current_animating_path[state.animating_hop_idx]:
                     color = 'yellow'
@@ -378,9 +386,9 @@ def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n
                 x=[node['x']], y=[node['y']],
                 mode='markers+text',
                 marker=dict(size=30, symbol=SYMBOLS[node['type']], color=color),
-                text=[f"Node {node['id']}<br>{UNICODE_ICONS[node['type']]}"],
+                text=[node_label],
                 textposition="bottom center",
-                hovertext=f"Node {node['id']} ({node['type']})",
+                hovertext=f"Node {node['id']} ({node['type']})<br>Range: {tx_range}m",
                 hoverinfo="text"
             ))
             
