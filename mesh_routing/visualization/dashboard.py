@@ -109,6 +109,35 @@ def update_metrics(engine):
 
 app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'], suppress_callback_exceptions=True)
 
+# CSS to disable the default Dash loading overlay which causes flickering
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            ._dash-loading {
+                display: none !important;
+            }
+            .dash-spinner {
+                display: none !important;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
 # Cisco-like styling constants
 CISCO_BLUE = "#005a9e"
 GRID_COLOR = "#e5e5e5"
@@ -329,9 +358,13 @@ def render_tab_content(tab):
      Input('tx-range-slider', 'value'),
      Input('animation-interval', 'n_intervals')],
     [State('device-type-dropdown', 'value'),
-     State('quick-nodes-input', 'value')]
+     State('quick-nodes-input', 'value'),
+     State('main-tabs', 'value')]
 )
-def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n, device_type, quick_n):
+def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n, device_type, quick_n, active_tab):
+    if active_tab != 'interactive':
+        return [dash.no_update]*4
+
     ctx = dash.callback_context
     trigger = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ""
     
@@ -528,9 +561,13 @@ def handle_animations(n):
      Output('q-stats-display', 'children'),
      Output('status-banner', 'children'), 
      Output('q-table-panel', 'style')],
-    [Input('interval-component', 'n_intervals')]
+    [Input('interval-component', 'n_intervals')],
+    [State('main-tabs', 'value')]
 )
-def update_research_charts(n):
+def update_research_charts(n, active_tab):
+    if active_tab != 'research':
+        return [dash.no_update]*7
+
     with state.lock:
         nodes = state.topology.get('nodes', [])
         if not nodes:
