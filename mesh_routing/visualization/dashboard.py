@@ -290,19 +290,24 @@ EMPTY_FIG = go.Figure(layout=go.Layout(
     [Input('main-tabs', 'value')]
 )
 def render_tab_content(tab):
-    if tab == 'research':
-        # Metrics figures should have different ranges
-        metrics_empty = go.Figure(layout=go.Layout(
-            xaxis=dict(visible=True, title="Time (s)"), 
-            yaxis=dict(visible=True, range=[0, 1.1], title="PDR"),
-            plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=40, r=20, t=30, b=40), uirevision='constant'
-        ))
-        tput_empty = go.Figure(layout=go.Layout(
-            xaxis=dict(visible=True, title="Time (s)"), 
-            yaxis=dict(visible=True, title="Throughput (kbps)"),
-            plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=40, r=20, t=30, b=40), uirevision='constant'
-        ))
+    # Visible empty placeholders
+    metrics_empty = go.Figure(layout=go.Layout(
+        xaxis=dict(visible=True, title="Time (s)", gridcolor=GRID_COLOR), 
+        yaxis=dict(visible=True, range=[0, 1.1], title="PDR", gridcolor=GRID_COLOR),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
+    ))
+    tput_empty = go.Figure(layout=go.Layout(
+        xaxis=dict(visible=True, title="Time (s)", gridcolor=GRID_COLOR), 
+        yaxis=dict(visible=True, title="Throughput (kbps)", gridcolor=GRID_COLOR),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
+    ))
+    reward_empty = go.Figure(layout=go.Layout(
+        xaxis=dict(visible=True, title="Components", gridcolor=GRID_COLOR),
+        yaxis=dict(visible=True, title="Contribution", gridcolor=GRID_COLOR),
+        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
+    ))
 
+    if tab == 'research':
         content = html.Div([
             html.Div([
                 html.H2("Wireless Mesh Network Dashboard", style={'display': 'inline-block', 'color': CISCO_BLUE}),
@@ -321,7 +326,7 @@ def render_tab_content(tab):
                     dcc.Graph(id='metrics-chart', figure=metrics_empty, style={'height': '300px'}),
                     html.Div(id='early-pdr-display', style={'textAlign': 'center', 'fontWeight': 'bold', 'color': CISCO_BLUE, 'marginBottom': '10px'}),
                     dcc.Graph(id='throughput-chart', figure=tput_empty, style={'height': '300px'}),
-                    dcc.Graph(id='reward-chart', figure=EMPTY_FIG, style={'height': '300px'})
+                    dcc.Graph(id='reward-chart', figure=reward_empty, style={'height': '300px'})
                 ], className="four columns")
             ], className="row")
         ])
