@@ -616,19 +616,25 @@ def update_research_charts(n):
         )
 
         history = state.metrics_history
-        times = [m['time'] for m in history]
-        metrics_fig = go.Figure()
-        metrics_fig.add_trace(go.Scatter(x=times, y=[m['pdr'] for m in history], name='PDR', line=dict(color=CISCO_BLUE)))
-        metrics_fig.update_layout(title="Packet Delivery Ratio", yaxis=dict(range=[0, 1.1]), margin=dict(t=30, b=30))
+        if not history:
+            metrics_fig = dash.no_update
+            tput_fig = dash.no_update
+            early_pdr_text = dash.no_update
+        else:
+            times = [m['time'] for m in history]
+            metrics_fig = go.Figure()
+            metrics_fig.add_trace(go.Scatter(x=times, y=[m['pdr'] for m in history], name='PDR', line=dict(color=CISCO_BLUE)))
+            metrics_fig.update_layout(title="Packet Delivery Ratio", yaxis=dict(range=[0, 1.1]), margin=dict(t=30, b=30), uirevision='constant')
 
-        tput_fig = go.Figure()
-        tput_fig.add_trace(go.Scatter(x=times, y=[m['throughput_bps']/1000 for m in history], fill='tozeroy', name='kbps', line=dict(color="#28a745")))
-        tput_fig.update_layout(title="Throughput (kbps)", margin=dict(t=30, b=30))
+            tput_fig = go.Figure()
+            tput_fig.add_trace(go.Scatter(x=times, y=[m['throughput_bps']/1000 for m in history], fill='tozeroy', name='kbps', line=dict(color="#28a745")))
+            tput_fig.update_layout(title="Throughput (kbps)", margin=dict(t=30, b=30), uirevision='constant')
+            
+            early_pdr_text = f"Early PDR (first 60s): {state.early_pdr:.2%}" if state.early_pdr > 0 else "Early PDR (first 60s): N/A"
         
         q_info = f"Avg Q: {state.q_stats['mean']:.2f} | Range: {state.q_stats['min']:.2f}-{state.q_stats['max']:.2f}"
-        early_pdr_text = f"Early PDR (first 60s): {state.early_pdr:.2%}" if state.early_pdr > 0 else "Early PDR (first 60s): N/A"
         
-        status = html.Span("● LIVE", style={'color': '#28a745'}) if not state.finished and times else html.Span("■ IDLE", style={'color': '#666'})
+        status = html.Span("● LIVE", style={'color': '#28a745'}) if not state.finished and nodes else html.Span("■ IDLE", style={'color': '#666'})
         if state.finished: status = html.Span("✓ COMPLETE", style={'color': CISCO_BLUE})
         q_style = {'display': 'block'} if state.protocol_name == 'CPQR' else {'display': 'none'}
         
