@@ -215,6 +215,9 @@ def get_interactive_sidebar():
 app.layout = html.Div([
     # Tooltips
     dcc.Tooltip(id="tx-range-tooltip", target="tx-range-slider", content="Nodes within this distance can communicate directly. Like Wi-Fi range — the further apart, the weaker the signal."),
+    dcc.Tooltip(id="source-tooltip", target="source-dropdown", content="This is where your data packet starts its journey — think of it as the sender's device."),
+    dcc.Tooltip(id="dest-tooltip", target="destination-dropdown", content="This is where your data packet needs to go — the final recipient."),
+    dcc.Tooltip(id="protocol-tooltip", target="interactive-protocol-radio", content="CPQR uses Artificial Intelligence to learn which paths are least congested and most reliable."),
     
     # Sidebar Container
     html.Div(id='sidebar-container', style=SIDEBAR_STYLE, children=get_research_sidebar()),
@@ -226,7 +229,7 @@ app.layout = html.Div([
             dcc.Tab(label='🖥️ Interactive Mode (Beginner)', value='interactive', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         ]),
         
-        html.Div(id='tab-content', style={'marginTop': '20px'})
+        dcc.Loading(id="loading-spinner", type="default", children=html.Div(id='tab-content', style={'marginTop': '20px'}))
     ], style=CONTENT_STYLE),
     
     dcc.Interval(id='interval-component', interval=500, n_intervals=0),
