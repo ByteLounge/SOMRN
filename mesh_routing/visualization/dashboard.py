@@ -107,7 +107,7 @@ def update_metrics(engine):
         state.congestion_events = getattr(engine.metrics, 'congestion_events', 0)
         state.early_pdr = getattr(engine.metrics, 'early_pdr', 0.0)
 
-app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'], suppress_callback_exceptions=True)
 
 # Cisco-like styling constants
 CISCO_BLUE = "#005a9e"
