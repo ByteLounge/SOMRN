@@ -111,6 +111,18 @@ python mesh_routing/experiments/run_batch.py
 python mesh_routing/experiments/plot_results.py
 ```
 
+### Scenario 4: Stress Test
+Run a predefined stress test scenario with all protocols (50 nodes, 20m/s speed, high load):
+```bash
+python mesh_routing/main.py --scenario stress_test --protocol all
+```
+
+### Scenario 5: Weight Sensitivity Analysis
+Perform a grid search over CPQR's reward weights (beta and W_e) to find the optimal configuration:
+```bash
+python mesh_routing/experiments/sensitivity_analysis.py
+```
+
 ## ✅ Quality Assurance
 
 The project maintains a rigorous testing standard. Run the full suite using:
