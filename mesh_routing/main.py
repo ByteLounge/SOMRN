@@ -35,9 +35,9 @@ def main():
     setup_logging(args.log_level)
     
     if args.live:
-        print("Starting live dashboard at http://localhost:8050")
+        print("Starting live dashboard at http://localhost:8888")
         print("Use the 'START SIMULATION' button in the dashboard to begin.")
-        run_dashboard(port=8050)
+        run_dashboard(port=8888)
         return
 
     # CLI / Batch Mode
