@@ -10,6 +10,11 @@ import os
 from typing import Dict, List, Optional
 import numpy as np
 import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("dashboard")
 
 from simulation.engine import SimulationEngine
 from config import SimConfig, ScenarioPresets
@@ -211,10 +216,10 @@ def get_interactive_sidebar():
         html.Hr(),
         
         html.Label("Add Device"),
-        dcc.Dropdown(id='device-type-dropdown',
+        html.Div(dcc.Dropdown(id='device-type-dropdown',
                      options=[{'label': v, 'value': k} for k, v in ICONS.items()],
-                     value='router', clearable=False,
-                     title="Pick a network device type to add to your custom mesh."),
+                     value='router', clearable=False),
+                 title="Pick a network device type to add to your custom mesh."),
         html.Button("Add Device to Canvas", id='add-device-btn', style={'width': '100%', 'marginTop': '10px'},
                     title="Click to place the selected device at a random location on the map."),
         html.Button("Clear Canvas", id='clear-canvas-btn', style={'width': '100%', 'marginTop': '5px', 'backgroundColor': '#dc3545', 'color': 'white'},
@@ -222,94 +227,53 @@ def get_interactive_sidebar():
         
         html.Hr(),
         html.Label("Quick Setup"),
-        dcc.Input(id='quick-nodes-input', type='number', min=5, max=20, value=10, style={'width': '100%'},
+        html.Div(dcc.Input(id='quick-nodes-input', type='number', min=5, max=20, value=10, style={'width': '100%'}),
                   title="Specify how many nodes you want to place automatically."),
         html.Button("Auto-Place Nodes", id='auto-place-btn', style={'width': '100%', 'marginTop': '5px'},
                     title="Instantly create a circular network with the chosen number of devices."),
         
         html.Hr(),
         html.Label("Transmission Range (m)"),
-        dcc.Slider(id='tx-range-slider', min=50, max=300, step=10, value=150, marks={i: str(i) for i in range(50, 301, 50)}),
+        html.Div(dcc.Slider(id='tx-range-slider', min=50, max=300, step=10, value=150, marks={i: str(i) for i in range(50, 301, 50)}),
+                 title="Nodes within this distance can communicate directly."),
         
         html.Hr(),
         html.Label("📤 Source Node"),
-        dcc.Dropdown(id='source-dropdown', options=[], placeholder="Select Source",
-                     title="This is where your data packet starts its journey — think of it as the sender's device."),
+        html.Div(dcc.Dropdown(id='source-dropdown', options=[], placeholder="Select Source"),
+                 title="This is where your data packet starts its journey — think of it as the sender's device."),
         
         html.Br(),
         html.Label("📥 Destination Node"),
-        dcc.Dropdown(id='destination-dropdown', options=[], placeholder="Select Destination",
-                     title="This is where your data packet needs to go — the final recipient."),
+        html.Div(dcc.Dropdown(id='destination-dropdown', options=[], placeholder="Select Destination"),
+                 title="This is where your data packet needs to go — the final recipient."),
         
         html.Hr(),
         html.Label("Choose Routing Protocol"),
-        dcc.RadioItems(id='interactive-protocol-radio',
+        html.Div(dcc.RadioItems(id='interactive-protocol-radio',
                        options=[{'label': '🧠 CPQR (AI-Powered)', 'value': 'CPQR'},
                                 {'label': '📡 AODV (Reactive)', 'value': 'AODV'},
                                 {'label': '🗺️ OLSR (Proactive)', 'value': 'OLSR'}],
-                       value='CPQR',
-                       title="CPQR uses Artificial Intelligence to learn which paths are least congested and most reliable."),
+                       value='CPQR'),
+                 title="CPQR uses Artificial Intelligence to learn which paths are least congested and most reliable."),
         
         html.Br(),
         html.Button("▶ START PACKET JOURNEY", id='start-journey-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white', 'fontWeight': 'bold', 'height': '50px'})
     ], id='interactive-sidebar')
 
 app.layout = html.Div([
-    # Sidebar Container
-    html.Div(id='sidebar-container', style=SIDEBAR_STYLE, children=get_research_sidebar()),
+    # Sidebar Containers
+    html.Div(id='research-sidebar-container', style=SIDEBAR_STYLE, children=get_research_sidebar()),
+    html.Div(id='interactive-sidebar-container', style={**SIDEBAR_STYLE, 'display': 'none'}, children=get_interactive_sidebar()),
 
-    # Main Content
+    # Main Content Container
     html.Div([
         dcc.Tabs(id='main-tabs', value='research', children=[
             dcc.Tab(label='📊 Research Mode (Advanced)', value='research', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
             dcc.Tab(label='🖥️ Interactive Mode (Beginner)', value='interactive', style={'fontWeight': 'bold'}, selected_style={'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         ]),
 
-        html.Div(id='tab-content', style={'marginTop': '20px'})
-    ], style=CONTENT_STYLE),
-    
-    dcc.Interval(id='interval-component', interval=500, n_intervals=0),
-    dcc.Interval(id='interval-component-slow', interval=2000, n_intervals=0),
-    dcc.Interval(id='animation-interval', interval=300, n_intervals=0)
-])
-
-# Default empty figure to prevent flickering but remain visible
-EMPTY_FIG = go.Figure(layout=go.Layout(
-    xaxis=dict(visible=True, range=[0, 500], showgrid=True, gridcolor=GRID_COLOR),
-    yaxis=dict(visible=True, range=[0, 500], showgrid=True, gridcolor=GRID_COLOR),
-    plot_bgcolor='white', paper_bgcolor='white',
-    margin=dict(l=40, r=20, t=40, b=40),
-    uirevision='constant'
-))
-
-# --- TAB CONTENT RENDERING ---
-
-@app.callback(
-    [Output('tab-content', 'children'),
-     Output('sidebar-container', 'children')],
-    [Input('main-tabs', 'value')]
-)
-def render_tab_content(tab):
-    print(f"DEBUG: Rendering tab: {tab}")
-    # Visible empty placeholders
-    metrics_empty = go.Figure(layout=go.Layout(
-        xaxis=dict(visible=True, title="Time (s)", gridcolor=GRID_COLOR), 
-        yaxis=dict(visible=True, range=[0, 1.1], title="PDR", gridcolor=GRID_COLOR),
-        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
-    ))
-    tput_empty = go.Figure(layout=go.Layout(
-        xaxis=dict(visible=True, title="Time (s)", gridcolor=GRID_COLOR), 
-        yaxis=dict(visible=True, title="Throughput (kbps)", gridcolor=GRID_COLOR),
-        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
-    ))
-    reward_empty = go.Figure(layout=go.Layout(
-        xaxis=dict(visible=True, title="Components", gridcolor=GRID_COLOR),
-        yaxis=dict(visible=True, title="Contribution", gridcolor=GRID_COLOR),
-        plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=50, r=20, t=30, b=50), uirevision='constant'
-    ))
-
-    if tab == 'research':
-        content = html.Div([
+        # Research Mode Content
+        html.Div(id='research-content', style={'marginTop': '20px'}, children=[
             html.Div([
                 html.H2("Wireless Mesh Network Dashboard", style={'display': 'inline-block', 'color': CISCO_BLUE}),
                 html.Div(id='status-banner', style={'float': 'right', 'marginTop': '25px', 'fontWeight': 'bold'})
@@ -324,16 +288,16 @@ def render_tab_content(tab):
                 ], className="eight columns"),
                 html.Div([
                     html.H5("Performance Metrics", style={'textAlign': 'center'}),
-                    dcc.Graph(id='metrics-chart', figure=metrics_empty, style={'height': '300px'}),
+                    dcc.Graph(id='metrics-chart', figure=EMPTY_FIG, style={'height': '300px'}),
                     html.Div(id='early-pdr-display', style={'textAlign': 'center', 'fontWeight': 'bold', 'color': CISCO_BLUE, 'marginBottom': '10px'}),
-                    dcc.Graph(id='throughput-chart', figure=tput_empty, style={'height': '300px'}),
-                    dcc.Graph(id='reward-chart', figure=reward_empty, style={'height': '300px'})
+                    dcc.Graph(id='throughput-chart', figure=EMPTY_FIG, style={'height': '300px'}),
+                    dcc.Graph(id='reward-chart', figure=EMPTY_FIG, style={'height': '300px'})
                 ], className="four columns")
             ], className="row")
-        ])
-        return content, get_research_sidebar()
-    else:
-        content = html.Div([
+        ]),
+
+        # Interactive Mode Content
+        html.Div(id='interactive-content', style={'marginTop': '20px', 'display': 'none'}, children=[
             html.H2("Interactive Packet Journey", style={'color': CISCO_BLUE}),
             html.Div([
                 html.Div([
@@ -360,7 +324,38 @@ def render_tab_content(tab):
                 html.Div(id='narration-panel', style={'padding': '15px', 'backgroundColor': '#f8f9fa', 'borderLeft': f'5px solid {CISCO_BLUE}', 'fontSize': '18px'})
             ])
         ])
-        return content, get_interactive_sidebar()
+    ], style=CONTENT_STYLE),
+    
+    dcc.Interval(id='interval-component', interval=500, n_intervals=0),
+    dcc.Interval(id='interval-component-slow', interval=2000, n_intervals=0),
+    dcc.Interval(id='animation-interval', interval=300, n_intervals=0)
+])
+
+# Default empty figure to prevent flickering but remain visible
+EMPTY_FIG = go.Figure(layout=go.Layout(
+    xaxis=dict(visible=True, range=[0, 500], showgrid=True, gridcolor=GRID_COLOR),
+    yaxis=dict(visible=True, range=[0, 500], showgrid=True, gridcolor=GRID_COLOR),
+    plot_bgcolor='white', paper_bgcolor='white',
+    margin=dict(l=40, r=20, t=40, b=40),
+    uirevision='constant'
+))
+
+# --- TAB CONTENT RENDERING ---
+
+@app.callback(
+    [Output('research-content', 'style'),
+     Output('interactive-content', 'style'),
+     Output('research-sidebar-container', 'style'),
+     Output('interactive-sidebar-container', 'style')],
+    [Input('main-tabs', 'value')]
+)
+def toggle_tabs(tab):
+    logger.info(f"Toggling to tab: {tab}")
+    res_display = {'marginTop': '20px'} if tab == 'research' else {'display': 'none'}
+    int_display = {'marginTop': '20px'} if tab == 'interactive' else {'display': 'none'}
+    res_side = SIDEBAR_STYLE if tab == 'research' else {**SIDEBAR_STYLE, 'display': 'none'}
+    int_side = SIDEBAR_STYLE if tab == 'interactive' else {**SIDEBAR_STYLE, 'display': 'none'}
+    return res_display, int_display, res_side, int_side
 
 # --- INTERACTIVE MODE CALLBACKS ---
 
@@ -735,6 +730,34 @@ def update_cpqr_status(n):
         reward_fig.update_layout(barmode='stack', title="Avg Reward Components", margin=dict(t=30, b=30))
         return status_table, reward_fig
 
+def run_simulation(protocol_name, n_nodes, speed, load, duration):
+    print(f"DEBUG: run_simulation started for {protocol_name}")
+    try:
+        protocol_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
+        config = SimConfig(num_nodes=n_nodes, max_speed=speed, packet_rate=load, duration=duration, seed=42)
+        
+        print(f"DEBUG: Creating SimulationEngine...")
+        engine = SimulationEngine(protocol_map[protocol_name], config, RandomWaypointMobility)
+        engine.on_snapshot_cb = lambda t, snap: update_metrics(engine)
+        engine.on_step_cb = lambda t: update_topology(engine)
+        
+        with state.lock:
+            state.finished = False
+            state.metrics_history = []
+            state.topology = {'nodes': [], 'edges': [], 'packets': []}
+            state.current_time = 0.0
+            state.config = config
+            
+        print(f"DEBUG: engine.run(real_time=True) called")
+        engine.run(real_time=True)
+        print(f"DEBUG: engine.run finished")
+    except Exception as e:
+        print(f"ERROR in run_simulation: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    with state.lock: state.finished = True
+
 @app.callback(
     Output('protocol-info', 'children'),
     Input('restart-btn', 'n_clicks'),
@@ -742,14 +765,18 @@ def update_cpqr_status(n):
      State('nodes-slider', 'value'),
      State('speed-slider', 'value'),
      State('load-slider', 'value'),
-     State('duration-input', 'value')],
-    prevent_initial_call=True
+     State('duration-input', 'value')]
 )
 def restart_sim(n_clicks, protocol, nodes, speed, load, duration):
+    print(f"DEBUG: restart_sim triggered (clicks: {n_clicks})")
+    if n_clicks is None:
+        return "Select parameters and press START SIMULATION"
     global current_sim_thread
     if current_sim_thread and current_sim_thread.is_alive():
+        print("DEBUG: Simulation already in progress")
         return "Simulation in progress..."
     
+    print(f"DEBUG: Starting new simulation thread for {protocol}")
     current_sim_thread = threading.Thread(
         target=run_simulation, 
         args=(protocol, nodes, speed, load, float(duration)), 
@@ -757,32 +784,6 @@ def restart_sim(n_clicks, protocol, nodes, speed, load, duration):
     )
     current_sim_thread.start()
     return f"Initializing {protocol} with {nodes} nodes..."
-
-@app.callback(Output('export-status', 'children'), Input('export-btn', 'n_clicks'), prevent_initial_call=True)
-def export_metrics(n_clicks):
-    with state.lock:
-        if not state.metrics_history: return "No data to export."
-        df = pd.DataFrame(state.metrics_history)
-        os.makedirs("results", exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = f"results/dashboard_export_{ts}.csv"
-        df.to_csv(path, index=False)
-        return f"Saved to {path}"
-
-def run_simulation(protocol_name, n_nodes, speed, load, duration):
-    protocol_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
-    config = SimConfig(num_nodes=n_nodes, max_speed=speed, packet_rate=load, duration=duration, seed=42)
-    engine = SimulationEngine(protocol_map[protocol_name], config, RandomWaypointMobility)
-    engine.on_snapshot_cb = lambda t, snap: update_metrics(engine)
-    engine.on_step_cb = lambda t: update_topology(engine)
-    with state.lock:
-        state.finished = False
-        state.metrics_history = []
-        state.topology = {'nodes': [], 'edges': [], 'packets': []}
-        state.current_time = 0.0
-        state.config = config
-    engine.run(real_time=True)
-    with state.lock: state.finished = True
 
 def run_dashboard(port=8050):
     app.run(debug=False, port=port)
