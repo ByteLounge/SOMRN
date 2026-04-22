@@ -321,7 +321,9 @@ def run_simulation(proto, n, speed, load, dur):
     engine = SimulationEngine(p_map[proto], config, RandomWaypointMobility)
     engine.on_snapshot_cb = lambda t, s: update_metrics(engine)
     engine.on_step_cb = lambda t: update_topology(engine)
-    with state.lock: state.finished, state.metrics_history, state.topology, state.current_time, state.config = False, [], {'nodes': [], 'edges': []}, 0.0, config
+    with state.lock: 
+        state.finished, state.metrics_history, state.topology, state.current_time, state.config = False, [], {'nodes': [], 'edges': []}, 0.0, config
+        state.protocol_name = proto
     engine.run(real_time=True)
     with state.lock: state.finished = True
     logger.warning(f"DEBUG: run_simulation finished")
