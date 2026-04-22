@@ -290,6 +290,7 @@ EMPTY_FIG = go.Figure(layout=go.Layout(
     [Input('main-tabs', 'value')]
 )
 def render_tab_content(tab):
+    print(f"DEBUG: Rendering tab: {tab}")
     # Visible empty placeholders
     metrics_empty = go.Figure(layout=go.Layout(
         xaxis=dict(visible=True, title="Time (s)", gridcolor=GRID_COLOR), 
