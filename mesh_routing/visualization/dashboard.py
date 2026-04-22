@@ -24,6 +24,7 @@ from protocols.cpqr import CPQR
 from core.mobility import RandomWaypointMobility
 from core.node import Node
 from core.packet import Packet
+from core.network import WirelessNetwork
 
 class DashboardState:
     def __init__(self):
@@ -185,19 +186,37 @@ def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n
             state.interactive_nodes = []
             for i in range(quick_n): state.interactive_nodes.append({'id': i, 'x': 250 + 150*np.cos(2*np.pi*i/quick_n), 'y': 250 + 150*np.sin(2*np.pi*i/quick_n), 'type': 'router'})
         fig = go.Figure()
+        # Draw all potential links
         for i, n1 in enumerate(state.interactive_nodes):
             for j, n2 in enumerate(state.interactive_nodes):
                 if i >= j: continue
                 if np.sqrt((n1['x']-n2['x'])**2 + (n1['y']-n2['y'])**2) <= tx_range:
-                    fig.add_trace(go.Scatter(x=[n1['x'], n2['x'], None], y=[n1['y'], n2['y'], None], mode='lines', line=dict(color=GRID_COLOR), opacity=0.5))
+                    fig.add_trace(go.Scatter(x=[n1['x'], n2['x'], None], y=[n1['y'], n2['y'], None], mode='lines', line=dict(color=GRID_COLOR, width=1), opacity=0.3, hoverinfo='none'))
+        
+        # Draw Packet if animating
+        if state.current_animating_path and state.animating_hop_idx < len(state.current_animating_path) - 1:
+            u_id = state.current_animating_path[state.animating_hop_idx]
+            v_id = state.current_animating_path[state.animating_hop_idx + 1]
+            u = next(n for n in state.interactive_nodes if n['id'] == u_id)
+            v = next(n for n in state.interactive_nodes if n['id'] == v_id)
+            # Intermediate position for packet
+            fig.add_trace(go.Scatter(x=[(u['x']+v['x'])/2], y=[(u['y']+v['y'])/2], mode='markers', marker=dict(size=15, color='orange', symbol='circle'), name='Traveling Packet'))
+
+        # Draw Nodes
         for node in state.interactive_nodes:
-            c = 'blue'
+            c = CISCO_BLUE
             if str(node['id']) == str(src): c = 'green'
-            if str(node['id']) == str(dst): c = 'red'
-            if state.current_animating_path and state.animating_hop_idx < len(state.current_animating_path):
-                if node['id'] == state.current_animating_path[state.animating_hop_idx]: c = 'yellow'
-            fig.add_trace(go.Scatter(x=[node['x']], y=[node['y']], mode='markers+text', marker=dict(size=25, color=c, symbol=SYMBOLS.get(node['type'], 'circle')), text=[f"N{node['id']}"]))
-        fig.update_layout(xaxis=dict(range=[0, 500]), yaxis=dict(range=[0, 500]), margin=dict(b=0,l=0,r=0,t=0), uirevision='const')
+            elif str(node['id']) == str(dst): c = 'red'
+            
+            # Highlight relay nodes in the path
+            if state.current_animating_path and node['id'] in state.current_animating_path:
+                idx = state.current_animating_path.index(node['id'])
+                if idx == state.animating_hop_idx: c = 'yellow' # Current focus
+                elif idx < state.animating_hop_idx: c = '#a0d1ff' # Visited
+
+            fig.add_trace(go.Scatter(x=[node['x']], y=[node['y']], mode='markers+text', marker=dict(size=25, color=c, symbol=SYMBOLS.get(node['type'], 'circle'), line=dict(width=2, color='white')), text=[f"N{node['id']}"], textposition="top center"))
+            
+        fig.update_layout(xaxis=dict(range=[0, 500], showgrid=True, gridcolor=GRID_COLOR), yaxis=dict(range=[0, 500], showgrid=True, gridcolor=GRID_COLOR), plot_bgcolor='white', margin=dict(b=0,l=0,r=0,t=0), uirevision='const', showlegend=False)
         opts = [{'label': f"Node {n['id']}", 'value': str(n['id'])} for n in state.interactive_nodes]
         return fig, opts, opts, state.narration
 
@@ -252,10 +271,10 @@ def update_res(n, tab):
             for i, n_info in enumerate(nodes):
                 if n_info['id'] == curr_id: node_c[i] = 'yellow'
         topo.add_trace(go.Scatter(x=node_x, y=node_y, mode='markers+text', marker=dict(size=15, color=node_c), text=[str(n['id']) for n in nodes]))
-        topo.update_layout(xaxis=dict(range=[0, 500]), yaxis=dict(range=[0, 500]), margin=dict(b=0,l=0,r=0,t=0), uirevision='const')
+        topo.update_layout(xaxis=dict(range=[0, 500], showgrid=False, zeroline=False), yaxis=dict(range=[0, 500], showgrid=False, zeroline=False), margin=dict(b=0,l=0,r=0,t=0), uirevision='const', showlegend=False)
         hist = state.metrics_history
-        pdr_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['pdr'] for m in hist])], layout=go.Layout(title="PDR", uirevision='const'))
-        tput_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['throughput_bps'] for m in hist])], layout=go.Layout(title="Throughput", uirevision='const'))
+        pdr_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['pdr'] for m in hist], fill='tozeroy', line=dict(color=CISCO_BLUE))], layout=go.Layout(title="Packet Delivery Ratio", yaxis=dict(range=[0, 1.1]), uirevision='const', margin=dict(l=40, r=20, t=40, b=40)))
+        tput_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['throughput_bps']/1000 for m in hist], fill='tozeroy', line=dict(color='green'))], layout=go.Layout(title="Throughput (kbps)", uirevision='const', margin=dict(l=40, r=20, t=40, b=40)))
         
         # Reward Chart logic
         reward_f = EMPTY_FIG
@@ -263,12 +282,16 @@ def update_res(n, tab):
             comps = state.reward_components
             labels = ['Delay', 'Congestion', 'Link', 'Energy']
             values = [comps.get(l.lower(), 0) for l in labels]
+            logger.warning(f"DEBUG: Reward components: {comps}, values: {values}")
             if sum(values) > 0:
-                reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.3)])
-                reward_f.update_layout(title="Reward Breakdown", margin=dict(l=20, r=20, t=40, b=20), showlegend=False)
+                reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#007bff', '#ffc107', '#dc3545', '#28a745']))])
+                reward_f.update_layout(title="Reward Breakdown", margin=dict(l=10, r=10, t=40, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            else:
+                logger.warning("DEBUG: sum(values) is 0, keeping EMPTY_FIG")
 
         status = "● LIVE" if not state.finished else "✓ DONE"
-        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, {}
+        q_style = {'display': 'block'} if state.protocol_name == 'CPQR' else {'display': 'none'}
+        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, q_style
 
 def run_simulation(proto, n, speed, load, dur):
     logger.warning(f"DEBUG: run_simulation started: {proto}")
