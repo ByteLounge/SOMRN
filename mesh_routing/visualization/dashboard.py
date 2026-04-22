@@ -226,20 +226,26 @@ def start_journey(n, src, dst, proto, tx):
     if not n or not src or not dst: return ""
     with state.lock:
         config = SimConfig(num_nodes=len(state.interactive_nodes), tx_range=tx)
+        # Use existing nodes to preserve positions
         net = WirelessNetwork(config)
-        for node in state.interactive_nodes: net.add_node(Node(node['id'], node['x'], node['y'], config))
+        for node in state.interactive_nodes:
+            new_node = Node(node['id'], node['x'], node['y'], config)
+            net.add_node(new_node)
         net.update_links()
         if not net.is_connected(int(src), int(dst)): return "No path!"
         p_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
         engine = SimulationEngine(p_map[proto], config)
-        engine.network, engine.protocol = net, p_map[proto](net, config)
+        engine.network = net
+        engine.protocol = p_map[proto](net, config)
         path, curr, pkt = [int(src)], int(src), Packet(int(src), int(dst), 0.0)
+        # Manually trace the path for animation
         while curr != int(dst) and len(path) < 20:
             nxt = engine.protocol.get_next_hop(curr, pkt)
-            if nxt == -1: break
-            path.append(nxt); curr = nxt
+            if nxt == -1 or nxt == curr: break
+            path.append(nxt)
+            curr = nxt
         state.current_animating_path, state.animating_hop_idx = path, 0
-        return f"Path: {' -> '.join(map(str, path))}"
+        return f"Path found: {' -> '.join(map(str, path))}"
 
 @app.callback([Output('animation-status', 'children')], [Input('animation-interval', 'n_intervals')])
 def anim_step(n):
@@ -270,7 +276,22 @@ def update_res(n, tab):
             curr_id = state.current_animating_path[state.animating_hop_idx]
             for i, n_info in enumerate(nodes):
                 if n_info['id'] == curr_id: node_c[i] = 'yellow'
-        topo.add_trace(go.Scatter(x=node_x, y=node_y, mode='markers+text', marker=dict(size=15, color=node_c), text=[str(n['id']) for n in nodes]))
+        # 2. Draw Nodes
+        node_x, node_y, node_c = [n['x'] for n in nodes], [n['y'] for n in nodes], [CISCO_BLUE for n in nodes]
+        topo.add_trace(go.Scatter(x=node_x, y=node_y, mode='markers+text', marker=dict(size=14, color=node_c, line=dict(width=1, color='white')), text=[str(n['id']) for n in nodes], textposition="top center", hoverinfo='text'))
+        
+        # 3. Draw Active Packets (Moving Dots)
+        packets = state.topology.get('packets', [])
+        if packets:
+            px, py = [], []
+            for p in packets:
+                s_node = next((n for n in nodes if n['id'] == p['source']), None)
+                t_node = next((n for n in nodes if n['id'] == p['target']), None)
+                if s_node and t_node:
+                    px.append((s_node['x'] + t_node['x'])/2)
+                    py.append((s_node['y'] + t_node['y'])/2)
+            topo.add_trace(go.Scatter(x=px, y=py, mode='markers', marker=dict(size=10, color='orange', symbol='circle'), name='Packets', hoverinfo='none'))
+
         topo.update_layout(xaxis=dict(range=[0, 500], showgrid=False, zeroline=False), yaxis=dict(range=[0, 500], showgrid=False, zeroline=False), margin=dict(b=0,l=0,r=0,t=0), uirevision='const', showlegend=False)
         hist = state.metrics_history
         pdr_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['pdr'] for m in hist], fill='tozeroy', line=dict(color=CISCO_BLUE))], layout=go.Layout(title="Packet Delivery Ratio", yaxis=dict(range=[0, 1.1]), uirevision='const', margin=dict(l=40, r=20, t=40, b=40)))
