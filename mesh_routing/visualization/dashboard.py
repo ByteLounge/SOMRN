@@ -236,12 +236,12 @@ def anim_step(n):
             return ["Done"]
         return [f"At {state.current_animating_path[state.animating_hop_idx]}"]
 
-@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')], [State('main-tabs', 'value')])
+@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('reward-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')], [State('main-tabs', 'value')])
 def update_res(n, tab):
-    if tab != 'research': return [dash.no_update]*7
+    if tab != 'research': return [dash.no_update]*8
     with state.lock:
         nodes = state.topology.get('nodes', [])
-        if not nodes: return EMPTY_FIG, EMPTY_FIG, "N/A", EMPTY_FIG, "N/A", "IDLE", {'display': 'none'}
+        if not nodes: return EMPTY_FIG, EMPTY_FIG, "N/A", EMPTY_FIG, EMPTY_FIG, "N/A", "IDLE", {'display': 'none'}
         topo = go.Figure()
         for e in state.topology.get('edges', []):
             s, t = next(n for n in nodes if n['id']==e['source']), next(n for n in nodes if n['id']==e['target'])
@@ -256,8 +256,19 @@ def update_res(n, tab):
         hist = state.metrics_history
         pdr_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['pdr'] for m in hist])], layout=go.Layout(title="PDR", uirevision='const'))
         tput_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['throughput_bps'] for m in hist])], layout=go.Layout(title="Throughput", uirevision='const'))
+        
+        # Reward Chart logic
+        reward_f = EMPTY_FIG
+        if state.protocol_name == 'CPQR':
+            comps = state.reward_components
+            labels = ['Delay', 'Congestion', 'Link', 'Energy']
+            values = [comps.get(l.lower(), 0) for l in labels]
+            if sum(values) > 0:
+                reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.3)])
+                reward_f.update_layout(title="Reward Breakdown", margin=dict(l=20, r=20, t=40, b=20), showlegend=False)
+
         status = "● LIVE" if not state.finished else "✓ DONE"
-        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, {}
+        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, {}
 
 def run_simulation(proto, n, speed, load, dur):
     logger.warning(f"DEBUG: run_simulation started: {proto}")
