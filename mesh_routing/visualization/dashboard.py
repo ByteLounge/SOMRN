@@ -172,16 +172,18 @@ def update_res(n):
         
         # Reward Chart logic
         reward_f = EMPTY_FIG
-        if state.protocol_name == 'CPQR':
+        if state.protocol_name.upper() == 'CPQR':
             comps = state.reward_components
             labels = ['Delay', 'Congestion', 'Link', 'Energy']
-            values = [comps.get(l.lower(), 0) for l in labels]
+            values = [comps.get(l.lower(), 0.0) for l in labels]
             if sum(values) > 0:
                 reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#007bff', '#ffc107', '#dc3545', '#28a745']))])
                 reward_f.update_layout(title="Reward Breakdown", margin=dict(l=10, r=10, t=40, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            else:
+                logger.warning(f"Reward values sum to zero: {comps}")
 
         status = "● LIVE" if not state.finished else "✓ DONE"
-        q_style = {'display': 'block'} if state.protocol_name == 'CPQR' else {'display': 'none'}
+        q_style = {'display': 'block'} if state.protocol_name.upper() == 'CPQR' else {'display': 'none'}
         return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, q_style
 
 def run_simulation(proto, n, speed, load, dur):
