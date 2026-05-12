@@ -18,6 +18,25 @@ The simulator provides a comprehensive framework for comparing CPQR against indu
 - **Mobility Models:** Dynamic node movement using Random Waypoint and Gauss-Markov models.
 - **Batch Experimentation:** Automated tools for running hundreds of simulations across various seeds, node counts, and speeds to generate statistical results.
 
+## 🖥️ Research Dashboard
+
+The simulator includes a high-performance live visualization suite built with Dash and Plotly for real-time protocol analysis.
+
+**Capabilities:**
+- **Live Topology View:** Real-time monitoring of node positions, link states, and packet flow.
+- **Enhanced Hop-by-Hop Animation:** Watch packets traverse the exact path selected by the RL agent, with visual feedback at each intermediate node.
+- **Intelligent Link Visualization:** Links are color-coded by congestion level (green/orange/red) and predicted lifetime (dashed for failing links).
+- **Dynamic Configuration:** Adjust Node Count (10-100), Speed (0-30m/s), and Traffic Load via sidebar sliders during a live run.
+- **Real-Time Analytics:** Live-updating charts for PDR, Throughput (kbps), and RL Reward breakdowns.
+- **AI Intelligence Tracking:** Monitor Q-table convergence, exploration rates, and proactive rerouting decisions as they happen.
+
+**To Launch:**
+```bash
+cd mesh_routing
+python main.py --live
+```
+Access at: `http://localhost:8888`
+
 ## 🧠 Technical Protocol: CPQR
 
 CPQR treats routing as a distributed reinforcement learning problem. Each node maintains a Q-table $Q(u, d, v)$ representing the expected "cost" (cumulative delay) to reach destination $d$ via neighbor $v$.
