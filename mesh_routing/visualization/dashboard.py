@@ -195,7 +195,10 @@ def run_simulation(proto, n, speed, load, dur):
     with state.lock: 
         state.finished, state.metrics_history, state.topology, state.current_time, state.config = False, [], {'nodes': [], 'edges': []}, 0.0, config
         state.protocol_name = proto
+        state.reward_components = {'delay': 0.0, 'congestion': 0.0, 'link': 0.0, 'energy': 0.0, 'count': 0}
     engine.run(real_time=True)
+    update_topology(engine)
+    update_metrics(engine)
     with state.lock: state.finished = True
 
 @app.callback(Output('protocol-info', 'children'), Input('restart-btn', 'n_clicks'), [State('protocol-dropdown', 'value'), State('nodes-slider', 'value'), State('speed-slider', 'value'), State('load-slider', 'value'), State('duration-input', 'value')])
