@@ -53,21 +53,12 @@ class SimulationEngine:
         
         self.on_snapshot_cb: Optional[Callable] = None
         self.on_step_cb: Optional[Callable] = None
-        self.packet_positions = [] # For dashboard animation
         
         # BUG 2 State tracking
         self._in_partition: bool = False
         self._dead_nodes: set = set()
         self.WARMUP_PERIOD: float = 10.0
         self.time = 0.0
-        self.completed_routes = [] # List of recent completed routes
-        self.MAX_COMPLETED_ROUTES = 20
-
-    def get_last_packet_routes(self) -> List[dict]:
-        """Returns the last completed packet routes and clears the buffer."""
-        routes = self.completed_routes[:]
-        self.completed_routes = []
-        return routes
 
     def run(self, real_time: bool = False) -> MetricsCollector:
         """Runs the simulation for the configured duration."""
@@ -77,7 +68,6 @@ class SimulationEngine:
             t = step * self.config.time_step
             self.time = t
             self.network.time = t
-            self.packet_positions = [] # Reset animations
             
             # 1. Mobility step
             self.mobility.step(self.config.time_step)
@@ -212,19 +202,8 @@ class SimulationEngine:
                     continue
 
                 if pkt.dst == node_id:
-                    # Record destination in route and store in completed_routes
+                    # Record destination in route
                     pkt.route.append(node_id)
-                    route_data = {
-                        "packet_id": pkt.packet_id,
-                        "protocol": self.protocol.name,
-                        "path": pkt.route[:],
-                        "timestamps": [t] * len(pkt.route), # Approximate timestamps
-                        "success": True
-                    }
-                    self.completed_routes.append(route_data)
-                    if len(self.completed_routes) > self.MAX_COMPLETED_ROUTES:
-                        self.completed_routes.pop(0)
-
                     # BUG 3 Fix A: on_packet_delivered
                     self.metrics.on_deliver(pkt, t, flow_id=getattr(pkt, 'flow_id', -1))
                     if hasattr(self.protocol, 'on_packet_delivered'):
@@ -254,8 +233,6 @@ class SimulationEngine:
                     energy_cost = node.energy_cost_to_forward(pkt.size)
                     node.consume_energy(energy_cost)
                     self.metrics.energy_consumed += energy_cost
-                    
-                    self.packet_positions.append({'source': node_id, 'target': next_hop})
                 else:
                     # No route or link break
                     if next_hop == -1:
@@ -286,8 +263,3 @@ class SimulationEngine:
                             self.protocol.on_packet_dropped(p)
                             
         self.metrics.record_active_nodes(active_nodes_this_step)
-
-    def get_topology_for_dashboard(self) -> dict:
-        snap = self.network.topology_snapshot()
-        snap['packets'] = self.packet_positions
-        return snap

@@ -99,8 +99,9 @@ class WirelessNetwork:
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return []
 
-    def topology_snapshot(self) -> Dict:
-        """Returns a serializable snapshot of the current topology for the dashboard."""
+    def topology_snapshot(self) -> dict:
+        """Returns a serializable snapshot of the current topology."""
+
         snapshot = {
             'nodes': [
                 {

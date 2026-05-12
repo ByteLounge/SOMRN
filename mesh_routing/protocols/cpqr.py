@@ -28,8 +28,6 @@ class CPQR(BaseProtocol):
         self.epsilon_decay = 0.995
         
         self.alpha = 0.8 # Faster adaptation for high mobility
-        
-        self.reward_components = {'delay': 0.0, 'congestion': 0.0, 'link': 0.0, 'energy': 0.0, 'count': 0}
         self.proactive_reroutes_count = 0
         
         for n in network.nodes:
@@ -157,10 +155,6 @@ class CPQR(BaseProtocol):
             oldest = next(iter(self.in_flight))
             del self.in_flight[oldest]
 
-    def _add_in_flight(self, pkt_id, node, via, sent_at):
-        if pkt_id not in self.in_flight: self.in_flight[pkt_id] = []
-        self.in_flight[pkt_id].append({'node': node, 'via': via, 'dst': -1, 'sent_at': sent_at})
-
     def on_packet_delivered(self, packet: Packet, delivery_time: Optional[float] = None):
         """Update Q-values for ALL hops upon successful delivery."""
         if delivery_time is None: delivery_time = self.net.time
@@ -185,13 +179,6 @@ class CPQR(BaseProtocol):
                 ep = self.config.w_e * energy_cost
                 
                 reward = delay + cp + llp + ep
-                
-                # Track components for dashboard
-                self.reward_components['delay'] += delay
-                self.reward_components['congestion'] += cp
-                self.reward_components['link'] += llp
-                self.reward_components['energy'] += ep
-                self.reward_components['count'] += 1
                 
                 if dst not in self.Q[u]: self.Q[u][dst] = {}
                 old_q = self.Q[u][dst].get(v, 10.0)
