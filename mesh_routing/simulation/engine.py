@@ -53,6 +53,7 @@ class SimulationEngine:
         
         self.on_snapshot_cb: Optional[Callable] = None
         self.on_step_cb: Optional[Callable] = None
+        self.packet_positions = [] # For dashboard animation
         
         # BUG 2 State tracking
         self._in_partition: bool = False
@@ -263,3 +264,13 @@ class SimulationEngine:
                             self.protocol.on_packet_dropped(p)
                             
         self.metrics.record_active_nodes(active_nodes_this_step)
+
+    def get_topology_for_dashboard(self) -> dict:
+        """Returns a serializable snapshot of the current topology for the dashboard."""
+        snap = self.network.topology_snapshot()
+        snap['packets'] = self.packet_positions
+        return snap
+
+    def get_last_packet_routes(self) -> List[dict]:
+        """Returns the last completed packet routes and clears the buffer (Placeholder for dashboard)."""
+        return []

@@ -28,6 +28,7 @@ class CPQR(BaseProtocol):
         self.epsilon_decay = 0.995
         
         self.alpha = 0.8 # Faster adaptation for high mobility
+        self.reward_components = {'delay': 0.0, 'congestion': 0.0, 'link': 0.0, 'energy': 0.0, 'count': 0}
         self.proactive_reroutes_count = 0
         
         for n in network.nodes:

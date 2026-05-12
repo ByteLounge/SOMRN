@@ -9,6 +9,7 @@ from simulation.engine import SimulationEngine
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
+from visualization.dashboard import run_dashboard
 from visualization.animator import TopologyAnimator
 from core.mobility import RandomWaypointMobility, GaussMarkovMobility
 
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--load", type=float, default=2.0)
     parser.add_argument("--duration", type=float, default=300.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--live", action="store_true", help="Launch live Dash dashboard")
     parser.add_argument("--save-video", action="store_true", help="Save animation to results/animation.mp4")
     parser.add_argument("--mobility", choices=['rwp', 'gauss'], default='rwp')
     parser.add_argument("--scenario", choices=['default', 'static', 'mobile', 'stress', 'stress_test'], default='default')
@@ -32,6 +34,12 @@ def main():
     args = parser.parse_args()
     setup_logging(args.log_level)
     
+    if args.live:
+        print("Starting live dashboard at http://localhost:8888")
+        print("Use the 'START SIMULATION' button in the dashboard to begin.")
+        run_dashboard(port=8888)
+        return
+
     # CLI / Batch Mode
     if args.scenario == 'static': config = ScenarioPresets.static_low_load()
     elif args.scenario == 'mobile': config = ScenarioPresets.mobile_high_load()
