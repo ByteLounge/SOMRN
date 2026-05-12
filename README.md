@@ -14,29 +14,9 @@ The simulator provides a comprehensive framework for comparing CPQR against indu
 ## 🚀 Key Features
 
 - **RL-Based Routing (CPQR):** An adaptive routing agent that learns optimal paths based on real-time network feedback (delay, congestion, and link stability).
-- **Cisco-Inspired Dashboard:** A professional-grade live visualization suite that mirrors the look and feel of Cisco Packet Tracer, allowing real-time topology management and metrics tracking.
 - **Physical Layer Modeling:** Simplified path-loss models (Friis/Log-distance), RSSI tracking, and dynamic link quality estimation.
 - **Mobility Models:** Dynamic node movement using Random Waypoint and Gauss-Markov models.
 - **Batch Experimentation:** Automated tools for running hundreds of simulations across various seeds, node counts, and speeds to generate statistical results.
-
-## 🖥️ Live Dashboard
-
-The simulator includes a high-performance web dashboard built with Dash and Plotly.
-
-**Capabilities:**
-- **Enhanced Hop-by-Hop Animation:** Watch packets traverse the exact path selected by the RL agent, with visual feedback at each intermediate node.
-- **Intelligent Link Visualization:** Links are color-coded by congestion level (green/orange/red) and predicted lifetime (dashed for failing links).
-- **Dynamic Configuration:** Adjust Node Count (10-100), Speed (0-30m/s), and Traffic Load via sidebar sliders.
-- **Interactive Metrics:** Live-updating charts for PDR and Throughput (kbps).
-- **CPQR Intelligence Status:** Track exploration rate, Q-guided mode percentage, congestion events, and proactive reroutes.
-- **Reward Component Breakdown:** Real-time visualization of delay, congestion, link lifetime, and energy penalty contributions.
-
-**To Launch:**
-```bash
-cd mesh_routing
-python main.py --live
-```
-Access at: `http://localhost:8050`
 
 ## 🧠 Technical Protocol: CPQR
 
