@@ -41,7 +41,7 @@ CPQR utilizes **Predicted Link Lifetime (LLT)**. If a link is predicted to break
 FYP/
 ├── README.md               # Detailed documentation
 └── mesh_routing/           # Root of the application
-    ├── main.py             # Entry point (Live or CLI mode)
+    ├── main.py             # Entry point
     ├── config.py           # Simulation parameters & presets
     ├── core/               # Physical & Network layer logic
     │   ├── network.py      # Topology and link management
@@ -53,8 +53,8 @@ FYP/
     │   └── olsr.py         # Proactive baseline
     ├── simulation/         # Core execution engine
     │   └── engine.py       # Orchestrates mobility and packet flow
-    ├── visualization/      # UI components
-    │   └── dashboard.py    # Cisco-style live dashboard
+    ├── visualization/      # Visualization components
+    │   └── animator.py     # Matplotlib animation tool
     └── tests/              # Comprehensive test suite
 ```
 
@@ -74,32 +74,26 @@ FYP/
 
 ## 📊 Usage Guide
 
-### Scenario 1: Live Interactive Research
-Launch the dashboard to manually stress-test protocols:
-```bash
-python mesh_routing/main.py --live
-```
-
-### Scenario 2: Headless Comparison (CLI)
+### Scenario 1: Headless Comparison (CLI)
 Run a specific configuration and get a summary report:
 ```bash
 python mesh_routing/main.py --protocol cpqr --nodes 50 --speed 15.0 --duration 600
 ```
 
-### Scenario 3: Batch Analysis
+### Scenario 2: Batch Analysis
 Run the automated experiment pipeline:
 ```bash
 python mesh_routing/experiments/run_batch.py
 python mesh_routing/experiments/plot_results.py
 ```
 
-### Scenario 4: Stress Test
+### Scenario 3: Stress Test
 Run a predefined stress test scenario with all protocols (50 nodes, 20m/s speed, high load):
 ```bash
 python mesh_routing/main.py --scenario stress_test --protocol all
 ```
 
-### Scenario 5: Weight Sensitivity Analysis
+### Scenario 4: Weight Sensitivity Analysis
 Perform a grid search over CPQR's reward weights (beta and W_e) to find the optimal configuration:
 ```bash
 python mesh_routing/experiments/sensitivity_analysis.py
@@ -112,9 +106,6 @@ The project maintains a rigorous testing standard. Run the full suite using:
 cd mesh_routing
 python -m pytest tests/ -v
 ```
-## Dashboard
-
-<img width="1913" height="870" alt="Screenshot 2026-04-19 214744" src="https://github.com/user-attachments/assets/b07c55e4-e260-4f5a-94f1-9ab58388cd79" />
 
 ## 📜 License
 This project is licensed under the MIT License - see the LICENSE file for details.

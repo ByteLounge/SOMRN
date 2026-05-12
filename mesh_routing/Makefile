@@ -1,7 +1,4 @@
-.PHONY: run test batch plots clean lint
-
-run:
-	python main.py --protocol cpqr --live
+.PHONY: test batch plots clean lint
 
 test:
 	pytest tests/ -v --cov=. --cov-report=term-missing
