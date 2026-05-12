@@ -45,17 +45,8 @@ class DashboardState:
         self.completed_routes: List[dict] = []
         self.current_animating_path: List[int] = []
         self.animating_hop_idx = 0
-        self.interactive_nodes = [] 
-        self.interactive_src = None
-        self.interactive_dst = None
-        self.interactive_tx_range = 150.0
-        self.narration = "Welcome! Place some devices and start a journey."
 
 state = DashboardState()
-
-ICONS = {'router': '🔴 Router', 'pc': '🖥️ PC', 'laptop': '💻 Laptop', 'access_point': '📡 AP'}
-UNICODE_ICONS = {'router': '⬢', 'pc': '🖥️', 'laptop': '💻', 'access_point': '📡'}
-SYMBOLS = {'router': 'hexagon', 'pc': 'square', 'laptop': 'diamond', 'access_point': 'star'}
 
 CISCO_BLUE = "#005a9e"
 GRID_COLOR = "#e5e5e5"
@@ -89,7 +80,7 @@ def update_metrics(engine):
         state.congestion_events = getattr(engine.metrics, 'congestion_events', 0)
         state.early_pdr = getattr(engine.metrics, 'early_pdr', 0.0)
 
-def get_research_sidebar():
+def get_sidebar():
     return html.Div([
         html.H3("SOMRN DASHBOARD", style={'color': CISCO_BLUE, 'fontWeight': 'bold'}),
         html.Hr(),
@@ -108,40 +99,14 @@ def get_research_sidebar():
         html.Button("START SIMULATION", id='restart-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         html.Hr(),
         html.Div(id='q-table-panel', children=[html.H6("AI Status"), html.Div(id='q-stats-display'), html.Div(id='cpqr-intelligence-status')])
-    ], id='research-sidebar-inner')
-
-def get_interactive_sidebar():
-    return html.Div([
-        html.H3("Interactive Mode", style={'color': CISCO_BLUE, 'fontWeight': 'bold'}),
-        html.Hr(),
-        html.Label("Add Device"),
-        html.Div(dcc.Dropdown(id='device-type-dropdown', options=[{'label': v, 'value': k} for k, v in ICONS.items()], value='router')),
-        html.Button("Add to Canvas", id='add-device-btn', style={'width': '100%'}),
-        html.Button("Clear", id='clear-canvas-btn', style={'width': '100%', 'backgroundColor': '#dc3545', 'color': 'white'}),
-        html.Hr(),
-        html.Label("Quick Nodes"),
-        html.Div(dcc.Input(id='quick-nodes-input', type='number', min=5, max=20, value=10)),
-        html.Button("Auto-Place", id='auto-place-btn', style={'width': '100%'}),
-        html.Hr(),
-        html.Label("Range (m)"),
-        html.Div(dcc.Slider(id='tx-range-slider', min=50, max=300, step=10, value=150)),
-        html.Hr(),
-        html.Label("Source"), html.Div(dcc.Dropdown(id='source-dropdown', options=[])),
-        html.Label("Destination"), html.Div(dcc.Dropdown(id='destination-dropdown', options=[])),
-        html.Hr(),
-        html.Div(dcc.RadioItems(id='interactive-protocol-radio', options=[{'label': 'CPQR', 'value': 'CPQR'}, {'label': 'AODV', 'value': 'AODV'}], value='CPQR')),
-        html.Br(),
-        html.Button("▶ START JOURNEY", id='start-journey-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white'})
-    ], id='interactive-sidebar-inner')
+    ], id='sidebar-inner')
 
 app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'], suppress_callback_exceptions=True)
 app.index_string = '''<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}<style>._dash-loading, .dash-spinner { display: none !important; }</style></head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>'''
 
 app.layout = html.Div([
-    html.Div(id='research-sidebar-container', style=SIDEBAR_STYLE, children=get_research_sidebar()),
-    html.Div(id='interactive-sidebar-container', style={**SIDEBAR_STYLE, 'display': 'none'}, children=get_interactive_sidebar()),
+    html.Div(id='sidebar-container', style=SIDEBAR_STYLE, children=get_sidebar()),
     html.Div([
-        dcc.Tabs(id='main-tabs', value='research', children=[dcc.Tab(label='📊 Research Mode', value='research'), dcc.Tab(label='🖥️ Interactive Mode', value='interactive')]),
         html.Div(id='research-content', style={'marginTop': '20px'}, children=[
             html.H2("Research Dashboard", style={'color': CISCO_BLUE}),
             html.Div(id='status-banner'), html.Div(id='protocol-info'),
@@ -149,103 +114,12 @@ app.layout = html.Div([
                 html.Div([dcc.Graph(id='topology-graph', figure=EMPTY_FIG, style={'height': '600px'}), html.Div(id='animation-status')], className="eight columns"),
                 html.Div([dcc.Graph(id='metrics-chart', figure=EMPTY_FIG, style={'height': '300px'}), html.Div(id='early-pdr-display'), dcc.Graph(id='throughput-chart', figure=EMPTY_FIG, style={'height': '300px'}), dcc.Graph(id='reward-chart', figure=EMPTY_FIG, style={'height': '300px'})], className="four columns")
             ], className="row")
-        ]),
-        html.Div(id='interactive-content', style={'marginTop': '20px', 'display': 'none'}, children=[
-            html.H2("Interactive Mode", style={'color': CISCO_BLUE}),
-            html.Div([
-                html.Div([dcc.Graph(id='interactive-canvas', figure=EMPTY_FIG, style={'height': '600px'}), html.Div(id='interactive-animation-status')], className="nine columns"),
-                html.Div([html.H5("Legend"), html.Div("🟢 Source | 🔴 Dest | 🔵 Relay")], className="three columns")
-            ], className="row"),
-            html.Div(id='narration-panel', style={'padding': '15px', 'backgroundColor': '#f8f9fa'})
         ])
     ], style=CONTENT_STYLE),
     dcc.Interval(id='interval-component', interval=500),
     dcc.Interval(id='interval-component-slow', interval=2000),
     dcc.Interval(id='animation-interval', interval=300)
 ])
-
-@app.callback([Output('research-content', 'style'), Output('interactive-content', 'style'), Output('research-sidebar-container', 'style'), Output('interactive-sidebar-container', 'style')], [Input('main-tabs', 'value')])
-def toggle_tabs(tab):
-    logger.warning(f"DEBUG: toggle_tabs triggered: {tab}")
-    res_v = {'marginTop': '20px'} if tab == 'research' else {'display': 'none'}
-    int_v = {'marginTop': '20px'} if tab == 'interactive' else {'display': 'none'}
-    res_s = SIDEBAR_STYLE if tab == 'research' else {**SIDEBAR_STYLE, 'display': 'none'}
-    int_s = SIDEBAR_STYLE if tab == 'interactive' else {**SIDEBAR_STYLE, 'display': 'none'}
-    return res_v, int_v, res_s, int_s
-
-@app.callback([Output('interactive-canvas', 'figure'), Output('source-dropdown', 'options'), Output('destination-dropdown', 'options'), Output('narration-panel', 'children')], [Input('add-device-btn', 'n_clicks'), Input('clear-canvas-btn', 'n_clicks'), Input('auto-place-btn', 'n_clicks'), Input('source-dropdown', 'value'), Input('destination-dropdown', 'value'), Input('tx-range-slider', 'value'), Input('animation-interval', 'n_intervals')], [State('device-type-dropdown', 'value'), State('quick-nodes-input', 'value'), State('main-tabs', 'value')])
-def update_interactive_canvas(add_n, clear_n, auto_n, src, dst, tx_range, anim_n, device_type, quick_n, active_tab):
-    if active_tab != 'interactive': return [dash.no_update]*4
-    ctx = dash.callback_context
-    trigger = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ""
-    with state.lock:
-        if trigger == 'animation-interval' and not state.current_animating_path: return [dash.no_update]*4
-        if trigger == 'clear-canvas-btn': state.interactive_nodes, state.interactive_src, state.interactive_dst, state.narration = [], None, None, "Cleared."
-        elif trigger == 'add-device-btn' and len(state.interactive_nodes) < 20: state.interactive_nodes.append({'id': len(state.interactive_nodes), 'x': np.random.uniform(50, 450), 'y': np.random.uniform(50, 450), 'type': device_type})
-        elif trigger == 'auto-place-btn':
-            state.interactive_nodes = []
-            for i in range(quick_n): state.interactive_nodes.append({'id': i, 'x': 250 + 150*np.cos(2*np.pi*i/quick_n), 'y': 250 + 150*np.sin(2*np.pi*i/quick_n), 'type': 'router'})
-        fig = go.Figure()
-        # Draw all potential links
-        for i, n1 in enumerate(state.interactive_nodes):
-            for j, n2 in enumerate(state.interactive_nodes):
-                if i >= j: continue
-                if np.sqrt((n1['x']-n2['x'])**2 + (n1['y']-n2['y'])**2) <= tx_range:
-                    fig.add_trace(go.Scatter(x=[n1['x'], n2['x'], None], y=[n1['y'], n2['y'], None], mode='lines', line=dict(color=GRID_COLOR, width=1), opacity=0.3, hoverinfo='none'))
-        
-        # Draw Packet if animating
-        if state.current_animating_path and state.animating_hop_idx < len(state.current_animating_path) - 1:
-            u_id = state.current_animating_path[state.animating_hop_idx]
-            v_id = state.current_animating_path[state.animating_hop_idx + 1]
-            u = next(n for n in state.interactive_nodes if n['id'] == u_id)
-            v = next(n for n in state.interactive_nodes if n['id'] == v_id)
-            # Intermediate position for packet
-            fig.add_trace(go.Scatter(x=[(u['x']+v['x'])/2], y=[(u['y']+v['y'])/2], mode='markers', marker=dict(size=15, color='orange', symbol='circle'), name='Traveling Packet'))
-
-        # Draw Nodes
-        for node in state.interactive_nodes:
-            c = CISCO_BLUE
-            if str(node['id']) == str(src): c = 'green'
-            elif str(node['id']) == str(dst): c = 'red'
-            
-            # Highlight relay nodes in the path
-            if state.current_animating_path and node['id'] in state.current_animating_path:
-                idx = state.current_animating_path.index(node['id'])
-                if idx == state.animating_hop_idx: c = 'yellow' # Current focus
-                elif idx < state.animating_hop_idx: c = '#a0d1ff' # Visited
-
-            fig.add_trace(go.Scatter(x=[node['x']], y=[node['y']], mode='markers+text', marker=dict(size=25, color=c, symbol=SYMBOLS.get(node['type'], 'circle'), line=dict(width=2, color='white')), text=[f"N{node['id']}"], textposition="top center"))
-            
-        fig.update_layout(xaxis=dict(range=[0, 500], showgrid=True, gridcolor=GRID_COLOR), yaxis=dict(range=[0, 500], showgrid=True, gridcolor=GRID_COLOR), plot_bgcolor='white', margin=dict(b=0,l=0,r=0,t=0), uirevision='const', showlegend=False)
-        opts = [{'label': f"Node {n['id']}", 'value': str(n['id'])} for n in state.interactive_nodes]
-        return fig, opts, opts, state.narration
-
-@app.callback(Output('interactive-animation-status', 'children'), [Input('start-journey-btn', 'n_clicks')], [State('source-dropdown', 'value'), State('destination-dropdown', 'value'), State('interactive-protocol-radio', 'value'), State('tx-range-slider', 'value')])
-def start_journey(n, src, dst, proto, tx):
-    logger.warning(f"DEBUG: start_journey triggered (clicks: {n})")
-    if not n or not src or not dst: return ""
-    with state.lock:
-        config = SimConfig(num_nodes=len(state.interactive_nodes), tx_range=tx)
-        # Use existing nodes to preserve positions
-        net = WirelessNetwork(config)
-        for node in state.interactive_nodes:
-            new_node = Node(node['id'], node['x'], node['y'], config)
-            net.add_node(new_node)
-        net.update_links()
-        if not net.is_connected(int(src), int(dst)): return "No path!"
-        p_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
-        engine = SimulationEngine(p_map[proto], config)
-        engine.network = net
-        engine.protocol = p_map[proto](net, config)
-        path, curr, pkt = [int(src)], int(src), Packet(int(src), int(dst), 0.0)
-        # Manually trace the path for animation
-        while curr != int(dst) and len(path) < 20:
-            nxt = engine.protocol.get_next_hop(curr, pkt)
-            if nxt == -1 or nxt == curr: break
-            path.append(nxt)
-            curr = nxt
-        state.current_animating_path, state.animating_hop_idx = path, 0
-        return f"Path found: {' -> '.join(map(str, path))}"
 
 @app.callback([Output('animation-status', 'children')], [Input('animation-interval', 'n_intervals')])
 def anim_step(n):
@@ -261,9 +135,8 @@ def anim_step(n):
             return ["Done"]
         return [f"At {state.current_animating_path[state.animating_hop_idx]}"]
 
-@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('reward-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')], [State('main-tabs', 'value')])
-def update_res(n, tab):
-    if tab != 'research': return [dash.no_update]*8
+@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('reward-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')])
+def update_res(n):
     with state.lock:
         nodes = state.topology.get('nodes', [])
         if not nodes: return EMPTY_FIG, EMPTY_FIG, "N/A", EMPTY_FIG, EMPTY_FIG, "N/A", "IDLE", {'display': 'none'}
@@ -303,19 +176,15 @@ def update_res(n, tab):
             comps = state.reward_components
             labels = ['Delay', 'Congestion', 'Link', 'Energy']
             values = [comps.get(l.lower(), 0) for l in labels]
-            logger.warning(f"DEBUG: Reward components: {comps}, values: {values}")
             if sum(values) > 0:
                 reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#007bff', '#ffc107', '#dc3545', '#28a745']))])
                 reward_f.update_layout(title="Reward Breakdown", margin=dict(l=10, r=10, t=40, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            else:
-                logger.warning("DEBUG: sum(values) is 0, keeping EMPTY_FIG")
 
         status = "● LIVE" if not state.finished else "✓ DONE"
         q_style = {'display': 'block'} if state.protocol_name == 'CPQR' else {'display': 'none'}
         return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, q_style
 
 def run_simulation(proto, n, speed, load, dur):
-    logger.warning(f"DEBUG: run_simulation started: {proto}")
     p_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
     config = SimConfig(num_nodes=n, max_speed=speed, packet_rate=load, duration=dur)
     engine = SimulationEngine(p_map[proto], config, RandomWaypointMobility)
@@ -326,11 +195,9 @@ def run_simulation(proto, n, speed, load, dur):
         state.protocol_name = proto
     engine.run(real_time=True)
     with state.lock: state.finished = True
-    logger.warning(f"DEBUG: run_simulation finished")
 
 @app.callback(Output('protocol-info', 'children'), Input('restart-btn', 'n_clicks'), [State('protocol-dropdown', 'value'), State('nodes-slider', 'value'), State('speed-slider', 'value'), State('load-slider', 'value'), State('duration-input', 'value')])
 def restart(n, proto, nodes, speed, load, dur):
-    logger.warning(f"DEBUG: restart clicked (n_clicks: {n})")
     if n is None: return "Ready."
     threading.Thread(target=run_simulation, args=(proto, nodes, speed, load, dur), daemon=True).start()
     return f"Starting {proto}..."
