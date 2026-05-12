@@ -133,24 +133,9 @@ The SOMRN simulator is modular, written in Python 3.12, and divided into four pi
 ### Pillar 3: The Engine (The Time Machine)
 *   `engine.py`: The heart of the project. It runs a loop: Move Nodes -> Update Links -> Generate Traffic -> Forward Packets -> Collect Metrics.
 
-### Pillar 4: The Visualization (The Dashboard)
-*   `dashboard.py`: A Dash/Plotly application that provides the "Cisco Mode" interface.
-
----
-
-## IX. VISUALIZATION: RESEARCH DASHBOARD AND CONTINUOUS ANIMATION
-A major part of this project was making complex AI decisions visible.
-
-### 9.1 Research Mode (Advanced Analysis)
-This mode provides a high-fidelity view of the network state:
-*   **Intelligent Link Color-Coding:** Links dynamically change color based on congestion: **Green** (<30%), **Orange** (30-70%), and **Red** (>70%). **Dashed Red** lines indicate links predicted to break within 5 seconds based on RSSI trends.
-*   **Node Status Icons:** Every node displays a real-time status marker: 🟢 (Idle), 🟡 (Forwarding), or 🔴 (Congested).
-*   **Multi-Panel Analytics:** Synchronized charts for PDR, Throughput, Reward Breakdowns, and RL Convergence status.
-
-### 9.2 Continuous Hop-by-Hop Animation
-Unlike standard simulators that show disconnected packet movements, SOMRN implements **Continuous Path Tracking**. When a packet is sent, a single animated yellow dot traverses the *entire* route from source to destination in sequence. This allows the researcher to visually verify that CPQR is passing through the specific hops intended by the Q-table.
-
----
+### Pillar 4: The Analysis (The Reporter)
+*   `experiments/`: Automation scripts for large-scale data collection.
+*   `results/`: Storage for simulation logs and performance charts.
 
 ---
 
@@ -173,10 +158,10 @@ Our analysis (recorded in `results/sensitivity_heatmap_pdr.png`) shows that a ba
 ---
 
 ## XI. USER GUIDELINES: HOW TO RUN AND EXTEND
-### 11.1 Basic Execution
-To see the "Cisco Mode" dashboard:
+### 11.1 Basic Execution (CLI)
+To run a simulation and get a performance summary:
 ```bash
-python main.py --live
+python main.py --protocol cpqr --nodes 30 --speed 5.0
 ```
 ### 11.2 Headless Research (Batch Mode)
 To run 100 simulations in the background and get a CSV report:
