@@ -112,7 +112,7 @@ app.layout = html.Div([
             html.Div(id='status-banner'), html.Div(id='protocol-info'),
             html.Div([
                 html.Div([dcc.Graph(id='topology-graph', figure=EMPTY_FIG, style={'height': '600px'}), html.Div(id='animation-status')], className="eight columns"),
-                html.Div([dcc.Graph(id='metrics-chart', figure=EMPTY_FIG, style={'height': '300px'}), html.Div(id='early-pdr-display'), dcc.Graph(id='throughput-chart', figure=EMPTY_FIG, style={'height': '300px'}), dcc.Graph(id='reward-chart', figure=EMPTY_FIG, style={'height': '300px'})], className="four columns")
+                html.Div([dcc.Graph(id='metrics-chart', figure=EMPTY_FIG, style={'height': '300px'}), html.Div(id='early-pdr-display'), dcc.Graph(id='throughput-chart', figure=EMPTY_FIG, style={'height': '300px'})], className="four columns")
             ], className="row")
         ])
     ], style=CONTENT_STYLE),
@@ -135,11 +135,11 @@ def anim_step(n):
             return ["Done"]
         return [f"At {state.current_animating_path[state.animating_hop_idx]}"]
 
-@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('reward-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')])
+@app.callback([Output('topology-graph', 'figure'), Output('metrics-chart', 'figure'), Output('early-pdr-display', 'children'), Output('throughput-chart', 'figure'), Output('q-stats-display', 'children'), Output('status-banner', 'children'), Output('q-table-panel', 'style')], [Input('interval-component', 'n_intervals')])
 def update_res(n):
     with state.lock:
         nodes = state.topology.get('nodes', [])
-        if not nodes: return EMPTY_FIG, EMPTY_FIG, "N/A", EMPTY_FIG, EMPTY_FIG, "N/A", "IDLE", {'display': 'none'}
+        if not nodes: return EMPTY_FIG, EMPTY_FIG, "N/A", EMPTY_FIG, "N/A", "IDLE", {'display': 'none'}
         topo = go.Figure()
         for e in state.topology.get('edges', []):
             s, t = next(n for n in nodes if n['id']==e['source']), next(n for n in nodes if n['id']==e['target'])
@@ -169,22 +169,10 @@ def update_res(n):
         hist = state.metrics_history
         pdr_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['pdr'] for m in hist], fill='tozeroy', line=dict(color=CISCO_BLUE))], layout=go.Layout(title="Packet Delivery Ratio", yaxis=dict(range=[0, 1.1]), uirevision='const', margin=dict(l=40, r=20, t=40, b=40)))
         tput_f = go.Figure(data=[go.Scatter(x=[m['time'] for m in hist], y=[m['throughput_bps']/1000 for m in hist], fill='tozeroy', line=dict(color='green'))], layout=go.Layout(title="Throughput (kbps)", uirevision='const', margin=dict(l=40, r=20, t=40, b=40)))
-        
-        # Reward Chart logic
-        reward_f = EMPTY_FIG
-        if state.protocol_name.upper() == 'CPQR':
-            comps = state.reward_components
-            labels = ['Delay', 'Congestion', 'Link', 'Energy']
-            values = [comps.get(l.lower(), 0.0) for l in labels]
-            if sum(values) > 0:
-                reward_f = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#007bff', '#ffc107', '#dc3545', '#28a745']))])
-                reward_f.update_layout(title="Reward Breakdown", margin=dict(l=10, r=10, t=40, b=10), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            else:
-                logger.warning(f"Reward values sum to zero: {comps}")
 
         status = "● LIVE" if not state.finished else "✓ DONE"
         q_style = {'display': 'block'} if state.protocol_name.upper() == 'CPQR' else {'display': 'none'}
-        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, reward_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, q_style
+        return topo, pdr_f, f"Early: {state.early_pdr:.1%}", tput_f, f"Avg Q: {state.q_stats['mean']:.2f}", status, q_style
 
 def run_simulation(proto, n, speed, load, dur):
     p_map = {'AODV': AODV, 'OLSR': OLSR, 'CPQR': CPQR}
