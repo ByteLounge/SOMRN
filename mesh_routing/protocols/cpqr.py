@@ -181,6 +181,13 @@ class CPQR(BaseProtocol):
                 
                 reward = delay + cp + llp + ep
                 
+                # Track components for dashboard telemetry
+                self.reward_components['delay'] += delay
+                self.reward_components['congestion'] += cp
+                self.reward_components['link'] += llp
+                self.reward_components['energy'] += ep
+                self.reward_components['count'] += 1
+                
                 if dst not in self.Q[u]: self.Q[u][dst] = {}
                 old_q = self.Q[u][dst].get(v, 10.0)
                 
