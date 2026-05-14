@@ -1,4 +1,4 @@
-.PHONY: test batch plots clean lint
+.PHONY: test batch plots clean lint demo poster beginner compare
 
 test:
 	pytest tests/ -v --cov=. --cov-report=term-missing
@@ -14,3 +14,17 @@ clean:
 
 lint:
 	black . && mypy .
+
+demo:
+	python main.py --demo
+
+poster:
+	python experiments/generate_poster_graphic.py
+
+beginner:
+	python main.py --protocol cpqr --scenario earthquake \
+	    --mode beginner --live
+
+compare:
+	python main.py --protocol cpqr --scenario campus \
+	    --mode intermediate --compare --live

@@ -34,36 +34,93 @@ class SimConfig:
 
 
 class ScenarioPresets:
-    """Presets for different simulation scenarios."""
-    
-    @staticmethod
-    def static_low_load() -> SimConfig:
-        """A scenario with stationary nodes and low traffic."""
-        return SimConfig(
-            max_speed=0.0,
-            min_speed=0.0,
-            packet_rate=1.0,
-            num_flows=2
-        )
 
     @staticmethod
-    def mobile_high_load() -> SimConfig:
-        """A scenario with moving nodes and high traffic."""
-        return SimConfig(
-            max_speed=10.0,
-            min_speed=2.0,
-            packet_rate=10.0,
-            num_flows=10
-        )
-
-    @staticmethod
-    def stress_test() -> SimConfig:
-        """A stress test scenario with many fast-moving nodes and very high load."""
-        return SimConfig(
+    def earthquake_response() -> tuple[SimConfig, dict]:
+        cfg = SimConfig(
             num_nodes=50,
-            max_speed=20.0,
-            min_speed=5.0,
-            packet_rate=20.0,
-            num_flows=20,
-            tx_range=80.0
+            area_size=600.0,
+            max_speed=12.0,
+            min_speed=3.0,
+            packet_rate=4.0,
+            num_flows=8,
+            duration=300.0,
+            tx_range=110.0,
+            seed=7,
         )
+        meta = {
+            'name': 'Earthquake Response Zone',
+            'tagline': 'Emergency responders need reliable communication '
+                       'when infrastructure is destroyed.',
+            'thumbnail': '🆘',
+            'node_label': 'Rescue worker',
+            'packet_label': 'Rescue coordination message',
+            'break_label': 'Worker moved out of range',
+            'congestion_label': 'Channel overloaded with distress signals',
+            'recovery_label': 'Rerouted through available responder',
+            'context_color': '#E74C3C',
+        }
+        return cfg, meta
+
+    @staticmethod
+    def campus_mesh() -> tuple[SimConfig, dict]:
+        cfg = SimConfig(
+            num_nodes=30,
+            area_size=500.0,
+            max_speed=3.0,
+            min_speed=0.5,
+            packet_rate=2.0,
+            num_flows=5,
+            duration=300.0,
+            tx_range=100.0,
+            seed=42,
+        )
+        meta = {
+            'name': 'University Campus Mesh',
+            'tagline': 'Campus WiFi mesh handles hundreds of students '
+                       'moving between buildings.',
+            'thumbnail': '🎓',
+            'node_label': 'Student device',
+            'packet_label': 'Data request',
+            'break_label': 'Student walked out of range',
+            'congestion_label': 'Too many devices in one area',
+            'recovery_label': 'Rerouted through less busy path',
+            'context_color': '#2980B9',
+        }
+        return cfg, meta
+
+    @staticmethod
+    def drone_swarm() -> tuple[SimConfig, dict]:
+        cfg = SimConfig(
+            num_nodes=20,
+            area_size=400.0,
+            max_speed=22.0,
+            min_speed=8.0,
+            packet_rate=5.0,
+            num_flows=6,
+            duration=300.0,
+            tx_range=90.0,
+            seed=13,
+        )
+        meta = {
+            'name': 'Drone Swarm Coordination',
+            'tagline': 'Drones coordinating a search mission need routing '
+                       'that keeps up with fast movement.',
+            'thumbnail': '🚁',
+            'node_label': 'Drone',
+            'packet_label': 'Coordination command',
+            'break_label': 'Drone flew out of range',
+            'congestion_label': 'Drones converging, channel saturated',
+            'recovery_label': 'Rerouted through nearest drone',
+            'context_color': '#27AE60',
+        }
+        return cfg, meta
+
+    @staticmethod
+    def get_all() -> dict:
+        return {
+            'earthquake': ScenarioPresets.earthquake_response(),
+            'campus': ScenarioPresets.campus_mesh(),
+            'drone': ScenarioPresets.drone_swarm(),
+        }
+
