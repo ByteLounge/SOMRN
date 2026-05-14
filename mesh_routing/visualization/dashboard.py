@@ -70,6 +70,10 @@ app.layout = html.Div([
         html.Label("Speed (m/s)"), dcc.Slider(id='speed-slider', min=0, max=30, step=1, value=5),
         html.Label("Packet Rate"), dcc.Slider(id='load-slider', min=0.5, max=10, step=0.5, value=2),
         html.Br(),
+        html.Label("Duration (s)"),
+        dcc.Input(id='duration-input', type='number', value=300, min=10, max=3600, style={'width': '100%'}),
+        html.Br(),
+        html.Br(),
         html.Button("START SIMULATION", id='restart-btn', style={'width': '100%', 'backgroundColor': CISCO_BLUE, 'color': 'white'}),
         html.Hr(),
         html.Div(id='ai-panel', children=[html.H6("Q-Learning Status"), html.Div(id='q-stats-display')])
@@ -132,10 +136,10 @@ def run_sim_task(proto, n, speed, load, dur):
     update_metrics(engine)
     with state.lock: state.finished = True
 
-@app.callback(Output('tick', 'disabled'), Input('restart-btn', 'n_clicks'), [State('protocol-dropdown', 'value'), State('nodes-slider', 'value'), State('speed-slider', 'value'), State('load-slider', 'value')])
-def start_click(n, proto, nodes, speed, load):
+@app.callback(Output('tick', 'disabled'), Input('restart-btn', 'n_clicks'), [State('protocol-dropdown', 'value'), State('nodes-slider', 'value'), State('speed-slider', 'value'), State('load-slider', 'value'), State('duration-input', 'value')])
+def start_click(n, proto, nodes, speed, load, dur):
     if n:
-        threading.Thread(target=run_sim_task, args=(proto, nodes, speed, load, 300), daemon=True).start()
+        threading.Thread(target=run_sim_task, args=(proto, nodes, speed, load, dur), daemon=True).start()
     return False
 
 def run_dashboard(port=8050): app.run(debug=False, port=port, host='0.0.0.0')
