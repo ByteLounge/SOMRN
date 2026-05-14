@@ -28,16 +28,46 @@ def main():
     parser.add_argument("--live", action="store_true", help="Launch live Dash dashboard")
     parser.add_argument("--save-video", action="store_true", help="Save animation to results/animation.mp4")
     parser.add_argument("--mobility", choices=['rwp', 'gauss'], default='rwp')
-    parser.add_argument("--scenario", choices=['default', 'static', 'mobile', 'stress', 'stress_test'], default='default')
+    parser.add_argument("--scenario", choices=['earthquake', 'campus', 'drone', 'default'], default='default')
+    parser.add_argument("--mode", choices=['beginner', 'intermediate', 'expert'], default='expert')
+    parser.add_argument("--compare", action="store_true", help="Launch in side-by-side comparison mode")
+    parser.add_argument("--demo", action="store_true", help="Launch one-button viva demo")
     parser.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='WARNING')
     
     args = parser.parse_args()
+    
+    # Handle demo flag
+    if args.demo:
+        args.mode = 'beginner'
+        args.scenario = 'earthquake'
+        args.compare = True
+        args.live = True
+
     setup_logging(args.log_level)
     
+    # Load Scenario Preset
+    scenario_meta = None
+    if args.scenario != 'default':
+        presets = ScenarioPresets.get_all()
+        if args.scenario in presets:
+            config, scenario_meta = presets[args.scenario]
+            # Override individual args with preset
+            args.nodes = config.num_nodes
+            args.speed = config.max_speed
+            args.load = config.packet_rate
+            args.duration = config.duration
+            args.seed = config.seed
+
     if args.live:
-        print("Starting live dashboard at http://localhost:8050")
-        print("Use the 'START SIMULATION' button in the dashboard to begin.")
-        run_dashboard(port=8050)
+        print(f"Starting live dashboard at http://localhost:8050")
+        print("Mode:", args.mode)
+        print("Scenario:", args.scenario)
+        run_dashboard(
+            port=8050, 
+            initial_mode=args.mode, 
+            initial_scenario=args.scenario,
+            initial_compare=args.compare
+        )
         return
 
     # CLI / Batch Mode
