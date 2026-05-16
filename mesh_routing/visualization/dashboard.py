@@ -90,10 +90,24 @@ def get_layout():
         dcc.Store(id='active-scenario', data='default'),
         dcc.Store(id='compare-mode', data=False),
         dcc.Store(id='intro-hidden', data=False),
+        dcc.Store(id='sim-running', data=True),
         
         # SECTION A - Top Bar
         html.Div([
             html.H2("Self-Optimizing Mesh Routing Networks", style={'margin': '0', 'flex': '1'}),
+            html.Div([
+                html.Div([
+                    html.Label("Nodes:", style={'fontSize': '12px', 'marginRight': '5px'}),
+                    dcc.Input(id='input-nodes', type='number', value=30, min=5, max=100, style={'width': '60px', 'borderRadius': '5px', 'border': '1px solid #ccc'}),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+                html.Div([
+                    html.Label("Flows:", style={'fontSize': '12px', 'marginRight': '5px'}),
+                    dcc.Input(id='input-flows', type='number', value=5, min=1, max=20, style={'width': '60px', 'borderRadius': '5px', 'border': '1px solid #ccc'}),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+            ], style={'display': 'flex', 'gap': '15px', 'background': 'rgba(255,255,255,0.1)', 'padding': '5px 15px', 'borderRadius': '10px'}),
+            
+            html.Button("⏹ Stop Simulation", id='btn-start-stop', style={'padding': '8px 20px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer', 'background': '#E67E22', 'color': 'white', 'fontWeight': 'bold'}),
+
             html.Div([
                 html.Button(MODES['beginner']['label'], id='btn-beginner', style={'padding': '8px 15px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer'}),
                 html.Button(MODES['intermediate']['label'], id='btn-intermediate', style={'padding': '8px 15px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer'}),
@@ -380,21 +394,71 @@ def run_engine_loop(engine, stop_event, side='primary'):
         logger.error(f"Error in engine loop {side}: {e}")
 
 @app.callback(
+    [Output('sim-running', 'data'),
+     Output('btn-start-stop', 'children'),
+     Output('btn-start-stop', 'style')],
+    [Input('btn-start-stop', 'n_clicks')],
+    [State('sim-running', 'data')]
+)
+def start_stop_callback(n, running):
+    try:
+        if not n: return running, dash.no_update, dash.no_update
+        new_state = not running
+        label = "▶ Start Simulation" if not new_state else "⏹ Stop Simulation"
+        color = "#2ECC71" if not new_state else "#E67E22"
+        style = {'padding': '8px 20px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer', 'background': color, 'color': 'white', 'fontWeight': 'bold'}
+        
+        if not new_state:
+            state.reset_engines()
+            
+        return new_state, label, style
+    except Exception as ex:
+        logger.error(f"Error in start_stop_callback: {ex}")
+        return dash.no_update
+
+@app.callback(
     Output('main-content', 'children'),
     [Input('live-interval', 'n_intervals'),
      Input('active-mode', 'data'),
      Input('compare-mode', 'data'),
      Input('active-scenario', 'data'),
-     Input('intro-hidden', 'data')],
-    [State('protocol-dropdown', 'value')]
+     Input('intro-hidden', 'data'),
+     Input('sim-running', 'data'),
+     Input('input-nodes', 'value'),
+     Input('input-flows', 'value'),
+     Input('protocol-dropdown', 'value')]
 )
-def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, proto):
+def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, running, num_nodes, num_flows, proto):
     try:
         if not intro_hidden: return html.Div()
+        if not running:
+            return html.Div([
+                html.Div("Simulation Paused", style={'textAlign': 'center', 'fontSize': '24px', 'marginTop': '100px', 'opacity': '0.5'}),
+                html.P("Adjust settings above and click 'Start Simulation' to begin.", style={'textAlign': 'center'})
+            ])
         
         restart_needed = False
         with state.lock:
-            if state.active_scenario != scenario or state.compare_mode != compare:
+            # Check if config parameters changed
+            current_nodes = state.primary_engine.config.num_nodes if state.primary_engine else None
+            current_flows = state.primary_engine.config.num_flows if state.primary_engine else None
+            
+            # Map protocol name back to dropdown value
+            p_name = state.primary.protocol_name.lower() if state.primary.protocol_name else ""
+            current_proto = None
+            if "aodv" in p_name: current_proto = "aodv"
+            elif "olsr" in p_name: current_proto = "olsr"
+            elif "cpqr" in p_name: current_proto = "cpqr"
+            elif "q-routing" in p_name: current_proto = "q_routing"
+            elif "pqr" in p_name: current_proto = "pqr"
+            elif "drl" in p_name: current_proto = "drl"
+            
+            if (state.active_scenario != scenario or 
+                state.compare_mode != compare or 
+                current_nodes != num_nodes or 
+                current_flows != num_flows or
+                (current_proto and current_proto != proto)):
+                
                 restart_needed = True
                 state.active_scenario = scenario
                 state.compare_mode = compare
@@ -419,10 +483,14 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, proto):
                     'recovery_label': 'New route found',
                     'context_color': '#005a9e'
                 }
+            
+            # Override with user inputs
+            cfg.num_nodes = num_nodes
+            cfg.num_flows = num_flows
 
             if mode in ['beginner', 'intermediate']:
                 cfg.trace_mode = True
-                cfg.packet_rate = 0.5 # Slow down for better visualization
+                cfg.packet_rate = 0.5 
 
             state.narrator = Narrator(state.scenario_meta)
             from protocols.q_routing import QRouting
