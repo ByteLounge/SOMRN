@@ -55,6 +55,9 @@ class SimulationEngine:
         self.on_step_cb: Optional[Callable] = None
         self.packet_positions = [] # For dashboard animation
         
+        self.trace_packet: Optional[Packet] = None
+        self.active_trace_path: List[int] = []
+        
         # BUG 2 State tracking
         self._in_partition: bool = False
         self._dead_nodes: set = set()
@@ -101,15 +104,24 @@ class SimulationEngine:
             self.protocol.control_bytes_sent = 0 # Reset for current step counting
             
             # 5. Traffic generation (Poisson arrival)
-            for i, (src, dst) in enumerate(self.flows):
-                while t >= self.next_packet_times[i]:
-                    pkt = Packet(src=src, dst=dst, created_at=self.next_packet_times[i], size=self.config.packet_size)
-                    pkt.queued_at = self.next_packet_times[i]
-                    self.network.nodes[src].queue.append(pkt)
-                    if len(self.network.nodes[src].queue) >= int(0.8 * self.config.max_queue_capacity):
-                        self.metrics.on_congestion_event()
-                    self.metrics.on_send(pkt, self.next_packet_times[i], flow_id=i)
-                    self.next_packet_times[i] += self.rng.exponential(1.0 / self.config.packet_rate)
+            if self.config.trace_mode:
+                if self.trace_packet is None:
+                    src, dst = self.rng.choice(list(self.network.nodes.keys()), 2, replace=False)
+                    self.trace_packet = Packet(src=int(src), dst=int(dst), created_at=t, size=self.config.packet_size)
+                    self.trace_packet.queued_at = t
+                    self.network.nodes[int(src)].queue.append(self.trace_packet)
+                    self.active_trace_path = [int(src)]
+                    self.metrics.on_send(self.trace_packet, t, flow_id=0)
+            else:
+                for i, (src, dst) in enumerate(self.flows):
+                    while t >= self.next_packet_times[i]:
+                        pkt = Packet(src=src, dst=dst, created_at=self.next_packet_times[i], size=self.config.packet_size)
+                        pkt.queued_at = self.next_packet_times[i]
+                        self.network.nodes[src].queue.append(pkt)
+                        if len(self.network.nodes[src].queue) >= int(0.8 * self.config.max_queue_capacity):
+                            self.metrics.on_congestion_event()
+                        self.metrics.on_send(pkt, self.next_packet_times[i], flow_id=i)
+                        self.next_packet_times[i] += self.rng.exponential(1.0 / self.config.packet_rate)
             
             # 6. BUG 2: Partition Detection Fix
             if self.time >= self.WARMUP_PERIOD:
@@ -184,6 +196,8 @@ class SimulationEngine:
                 
                 # Node is dead, packets are lost
                 for pkt in node.queue:
+                    if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                        self.trace_packet = None
                     self.metrics.on_drop(pkt, t, "Node Dead")
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
@@ -197,6 +211,8 @@ class SimulationEngine:
                 # Route discovery timeout drop
                 if pkt.queued_at and (t - pkt.queued_at) > 5.0:
                     pkt.drop_reason = 'route_discovery_timeout'
+                    if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                        self.trace_packet = None
                     self.metrics.on_drop(pkt, t, reason='route_discovery_timeout')
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
@@ -205,6 +221,9 @@ class SimulationEngine:
                 if pkt.dst == node_id:
                     # Record destination in route
                     pkt.route.append(node_id)
+                    if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                        self.active_trace_path.append(node_id)
+                        self.trace_packet = None # Allow new one
                     # BUG 3 Fix A: on_packet_delivered
                     self.metrics.on_deliver(pkt, t, flow_id=getattr(pkt, 'flow_id', -1))
                     if hasattr(self.protocol, 'on_packet_delivered'):
@@ -214,6 +233,8 @@ class SimulationEngine:
                 if pkt.ttl <= 0:
                     # BUG 3 Fix A: on_packet_dropped for TTL
                     pkt.drop_reason = 'ttl_expired'
+                    if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                        self.trace_packet = None
                     self.metrics.on_drop(pkt, t, reason='ttl_expired')
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
@@ -226,6 +247,9 @@ class SimulationEngine:
                     pkt.hop_count += 1
                     pkt.ttl -= 1
                     pkt.route.append(node_id)
+                    if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                        if node_id not in self.active_trace_path:
+                            self.active_trace_path.append(node_id)
                     pkt.queued_at = t # reset queue time
                     next_step_queues[next_hop].append(pkt)
                     
@@ -241,10 +265,14 @@ class SimulationEngine:
                         if len(node.queue) < self.config.max_queue_capacity:
                             node.queue.append(pkt)
                         else:
+                            if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                                self.trace_packet = None
                             self.metrics.on_drop(pkt, t, "Queue Overflow")
                             if hasattr(self.protocol, 'on_packet_dropped'):
                                 self.protocol.on_packet_dropped(pkt)
                     else:
+                        if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
+                            self.trace_packet = None
                         self.metrics.on_drop(pkt, t, "No Route")
                         if hasattr(self.protocol, 'on_packet_dropped'):
                             self.protocol.on_packet_dropped(pkt)
@@ -259,6 +287,8 @@ class SimulationEngine:
                         if len(node.queue) >= int(0.8 * self.config.max_queue_capacity):
                             self.metrics.on_congestion_event()
                     else:
+                        if self.config.trace_mode and self.trace_packet and p.packet_id == self.trace_packet.packet_id:
+                            self.trace_packet = None
                         self.metrics.on_drop(p, t, "Queue Overflow")
                         if hasattr(self.protocol, 'on_packet_dropped'):
                             self.protocol.on_packet_dropped(p)
@@ -270,20 +300,6 @@ class SimulationEngine:
         snap = self.network.topology_snapshot()
         snap['packets'] = self.packet_positions
         snap['trace_path'] = self.active_trace_path
-        return snap
-
-    def get_last_packet_routes(self) -> List[dict]:
-        """Returns the last completed packet routes and clears the buffer (Placeholder for dashboard)."""
-        return []
-alizable snapshot of the current topology for the dashboard."""
-        snap = self.network.topology_snapshot()
-        snap['packets'] = self.packet_positions
-        return snap
-
-    def get_last_packet_routes(self) -> List[dict]:
-        """Returns the last completed packet routes and clears the buffer (Placeholder for dashboard)."""
-        return []
-itions
         return snap
 
     def get_last_packet_routes(self) -> List[dict]:
