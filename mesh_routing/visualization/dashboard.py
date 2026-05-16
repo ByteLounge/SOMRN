@@ -420,6 +420,10 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, proto):
                     'context_color': '#005a9e'
                 }
 
+            if mode in ['beginner', 'intermediate']:
+                cfg.trace_mode = True
+                cfg.packet_rate = 0.5 # Slow down for better visualization
+
             state.narrator = Narrator(state.scenario_meta)
             from protocols.q_routing import QRouting
             from protocols.pqr import PQR
