@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import math
 from typing import Dict, List, Optional
 from protocols.base import BaseProtocol
 from core.packet import Packet
@@ -132,8 +133,6 @@ class DRLRouting(BaseProtocol):
                 reward = -delay # Negative delay as reward
                 
                 # Simple Q-learning target
-                # We don't have the "next state" easily in this distributed setup without more tracking
-                # but we can use the reward directly for this step.
                 self.memory.append((data['state'], reward))
                 
             del self.in_flight[packet.packet_id]
