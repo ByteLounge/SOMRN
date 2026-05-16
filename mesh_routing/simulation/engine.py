@@ -269,6 +269,21 @@ class SimulationEngine:
         """Returns a serializable snapshot of the current topology for the dashboard."""
         snap = self.network.topology_snapshot()
         snap['packets'] = self.packet_positions
+        snap['trace_path'] = self.active_trace_path
+        return snap
+
+    def get_last_packet_routes(self) -> List[dict]:
+        """Returns the last completed packet routes and clears the buffer (Placeholder for dashboard)."""
+        return []
+alizable snapshot of the current topology for the dashboard."""
+        snap = self.network.topology_snapshot()
+        snap['packets'] = self.packet_positions
+        return snap
+
+    def get_last_packet_routes(self) -> List[dict]:
+        """Returns the last completed packet routes and clears the buffer (Placeholder for dashboard)."""
+        return []
+itions
         return snap
 
     def get_last_packet_routes(self) -> List[dict]:

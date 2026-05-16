@@ -27,10 +27,12 @@ class SimConfig:
     snapshot_interval: float = 10.0
     max_queue_capacity: int = 50
     log_level: str = "INFO"
-    min_explore_count: int = 5 # Minimum exploration count before using Q-values
+    max_explore_count: int = 5 # Minimum exploration count before using Q-values
     max_q_value: float = 1000.0 # Maximum Q-value to prevent divergence
     gamma_link: float = 0.3 # Link lifetime penalty weight
     w_e: float = 0.3 # Energy penalty weight
+    trace_mode: bool = False # If true, only one packet flows at a time and its path is marked
+
 
 
 class ScenarioPresets:
