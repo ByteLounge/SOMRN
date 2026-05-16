@@ -1,66 +1,95 @@
+// Loads pre-computed CSV files from the /results/ folder (served as static assets or via API)
+// Falls back to fetching from the backend API
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const API = "";
 
 export function useBackendSim() {
-  const [status, setStatus] = useState({ running: false, connected: false, params: {} });
+  const [status, setStatus]     = useState({ running: false, connected: false, params: {} });
   const [liveState, setLiveState] = useState(null);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
+  const [results, setResults]   = useState(null);
+  const [error, setError]       = useState(null);
   const pollRef = useRef(null);
 
-  // ── Check backend connectivity on mount ──
+  // ── Parse CSV text → array of objects ──
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map(h => h.trim());
+    return lines.slice(1).map(line => {
+      const vals = line.split(",");
+      const obj = {};
+      headers.forEach((h, i) => {
+        const v = (vals[i] || "").trim();
+        obj[h] = isNaN(v) || v === "" ? v : parseFloat(v);
+      });
+      return obj;
+    });
+  }
+
+  // ── Check backend, then load results ──
   useEffect(() => {
-    fetch(`${API}/api/status`)
+    // Check backend connectivity
+    fetch(`${API}/api/status`, { signal: AbortSignal.timeout(2000) })
       .then(r => r.json())
       .then(d => setStatus(s => ({ ...s, connected: true, running: d.running, params: d.params || {} })))
       .catch(() => setStatus(s => ({ ...s, connected: false })));
 
-    // Fetch pre-computed results
-    fetch(`${API}/api/results`)
+    // Try backend /api/results first
+    fetch(`${API}/api/results`, { signal: AbortSignal.timeout(3000) })
       .then(r => r.json())
-      .then(d => setResults(d))
-      .catch(() => setResults(null));
+      .then(d => { if (d && !d.error) setResults(d); else tryStaticCSVs(); })
+      .catch(() => tryStaticCSVs());
   }, []);
 
-  // ── Poll live state every 400ms when simulation running ──
-  useEffect(() => {
-    if (!status.connected) return;
+  // ── Load CSVs from /results/ static path ──
+  async function tryStaticCSVs() {
+    const files = [
+      { proto: "AODV", path: "/results/aodv_5.0_42.csv" },
+      { proto: "OLSR", path: "/results/olsr_5.0_42.csv" },
+      { proto: "CPQR", path: "/results/cpqr_5.0_42.csv" },
+    ];
+    const data = {};
+    await Promise.all(files.map(async ({ proto, path }) => {
+      try {
+        const r = await fetch(path, { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          const text = await r.text();
+          const rows = parseCSV(text);
+          if (rows.length > 0) data[proto] = rows;
+        }
+      } catch (_) {}
+    }));
+    if (Object.keys(data).length > 0) setResults(data);
+  }
 
+  // ── Poll backend every 400ms when connected ──
+  useEffect(() => {
     const poll = async () => {
       try {
-        const r = await fetch(`${API}/api/status`);
+        const r = await fetch(`${API}/api/status`, { signal: AbortSignal.timeout(1500) });
         const d = await r.json();
-        setStatus(s => ({ ...s, running: d.running, params: d.params || {} }));
-
+        setStatus(s => ({ ...s, connected: true, running: d.running, params: d.params || {} }));
         if (d.running) {
-          const sr = await fetch(`${API}/api/state`);
-          if (sr.ok) {
-            const snap = await sr.json();
-            setLiveState(snap);
-            setError(null);
-          }
+          const sr = await fetch(`${API}/api/state`, { signal: AbortSignal.timeout(1500) });
+          if (sr.ok) { setLiveState(await sr.json()); setError(null); }
         }
-      } catch (e) {
-        setError("Lost connection to backend");
+      } catch (_) {
+        setStatus(s => ({ ...s, connected: false }));
       }
     };
-
-    pollRef.current = setInterval(poll, 400);
+    pollRef.current = setInterval(poll, 500);
     return () => clearInterval(pollRef.current);
-  }, [status.connected]);
+  }, []);
 
   const startSim = useCallback(async (params) => {
     try {
       const r = await fetch(`${API}/api/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
       });
       if (r.ok) setStatus(s => ({ ...s, running: true, params }));
-    } catch (e) {
-      setError("Failed to start simulation");
-    }
+    } catch (e) { setError("Failed to start simulation"); }
   }, []);
 
   const stopSim = useCallback(async () => {
@@ -68,24 +97,19 @@ export function useBackendSim() {
       await fetch(`${API}/api/stop`, { method: "POST" });
       setStatus(s => ({ ...s, running: false }));
       setLiveState(null);
-    } catch (e) {
-      setError("Failed to stop simulation");
-    }
+    } catch (e) { setError("Failed to stop simulation"); }
   }, []);
 
   const triggerChaos = useCallback(async () => {
-    try {
-      await fetch(`${API}/api/chaos`, { method: "POST" });
-    } catch (e) {
-      setError("Failed to trigger chaos");
-    }
+    try { await fetch(`${API}/api/chaos`, { method: "POST" }); }
+    catch (_) {}
   }, []);
 
   const refreshResults = useCallback(() => {
-    fetch(`${API}/api/results`)
+    fetch(`${API}/api/results`, { signal: AbortSignal.timeout(3000) })
       .then(r => r.json())
-      .then(d => setResults(d))
-      .catch(() => {});
+      .then(d => { if (d && !d.error) setResults(d); else tryStaticCSVs(); })
+      .catch(() => tryStaticCSVs());
   }, []);
 
   return { status, liveState, results, error, startSim, stopSim, triggerChaos, refreshResults };
