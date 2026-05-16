@@ -117,7 +117,10 @@ def get_layout():
                         options=[
                             {'label': 'AODV (Reactive)', 'value': 'aodv'},
                             {'label': 'OLSR (Proactive)', 'value': 'olsr'},
-                            {'label': 'CPQR (Our RL System)', 'value': 'cpqr'}
+                            {'label': 'CPQR (Our RL System)', 'value': 'cpqr'},
+                            {'label': 'Q-Routing (Standard RL)', 'value': 'q_routing'},
+                            {'label': 'PQR (Predictive Q-Routing)', 'value': 'pqr'},
+                            {'label': 'DRL (Deep RL Routing)', 'value': 'drl'}
                         ],
                         value='cpqr',
                         style={'width': '200px', 'color': 'black'}
@@ -418,7 +421,17 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, proto):
                 }
 
             state.narrator = Narrator(state.scenario_meta)
-            p_map = {'aodv': AODV, 'olsr': OLSR, 'cpqr': CPQR}
+            from protocols.q_routing import QRouting
+            from protocols.pqr import PQR
+            from protocols.drl_routing import DRLRouting
+            p_map = {
+                'aodv': AODV, 
+                'olsr': OLSR, 
+                'cpqr': CPQR,
+                'q_routing': QRouting,
+                'pqr': PQR,
+                'drl': DRLRouting
+            }
             
             p_cls = p_map.get(proto, CPQR)
             state.primary_engine = SimulationEngine(p_cls, cfg, RandomWaypointMobility)

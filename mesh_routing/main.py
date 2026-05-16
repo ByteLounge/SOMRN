@@ -9,6 +9,9 @@ from simulation.engine import SimulationEngine
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
+from protocols.q_routing import QRouting
+from protocols.pqr import PQR
+from protocols.drl_routing import DRLRouting
 from visualization.dashboard import run_dashboard
 from visualization.animator import TopologyAnimator
 from core.mobility import RandomWaypointMobility, GaussMarkovMobility
@@ -19,7 +22,7 @@ def setup_logging(level_name: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Wireless Mesh Network Simulator")
-    parser.add_argument("--protocol", choices=['aodv', 'olsr', 'cpqr', 'all'], default='cpqr')
+    parser.add_argument("--protocol", choices=['aodv', 'olsr', 'cpqr', 'q_routing', 'pqr', 'drl', 'all'], default='cpqr')
     parser.add_argument("--nodes", type=int, default=30)
     parser.add_argument("--speed", type=float, default=5.0)
     parser.add_argument("--load", type=float, default=2.0)
@@ -83,10 +86,17 @@ def main():
             seed=args.seed
         )
         
-    protocol_map = {'aodv': AODV, 'olsr': OLSR, 'cpqr': CPQR}
+    protocol_map = {
+        'aodv': AODV, 
+        'olsr': OLSR, 
+        'cpqr': CPQR,
+        'q_routing': QRouting,
+        'pqr': PQR,
+        'drl': DRLRouting
+    }
     mobility_map = {'rwp': RandomWaypointMobility, 'gauss': GaussMarkovMobility}
     
-    protocols_to_run = ['aodv', 'olsr', 'cpqr'] if args.protocol == 'all' else [args.protocol]
+    protocols_to_run = list(protocol_map.keys()) if args.protocol == 'all' else [args.protocol]
     
     for proto in protocols_to_run:
         protocol_class = protocol_map[proto]
