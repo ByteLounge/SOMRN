@@ -241,6 +241,23 @@ def create_topo_fig(engine_state, scenario_meta, mode):
             marker=dict(size=12, color='#3498DB', symbol='triangle-right'),
             hoverinfo='none'
         ))
+
+    # Packets in flight
+    packets = engine_state.topology.get('packets', [])
+    if packets:
+        px, py, pt = [], [], []
+        for p in packets:
+            px.append(p['x'])
+            py.append(p['y'])
+            pt.append("✉️") # Message icon
+            
+        topo.add_trace(go.Scatter(
+            x=px, y=py, mode='text',
+            text=pt, textposition="middle center",
+            textfont=dict(size=20),
+            name='Packets',
+            hoverinfo='none'
+        ))
             
     # Nodes
     if nodes:

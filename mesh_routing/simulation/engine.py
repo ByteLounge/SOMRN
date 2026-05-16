@@ -194,12 +194,17 @@ class SimulationEngine:
 
     def _forward_all_packets(self, t: float):
         """Simulates packet transmission across the network."""
+        self.packet_positions = []
         next_step_queues = {node_id: [] for node_id in self.network.nodes}
         active_nodes_this_step = set()
         
         for node_id, node in self.network.nodes.items():
             if not node.queue:
                 continue
+                
+            # Add current packets to positions for visualization
+            for pkt in node.queue:
+                self.packet_positions.append({'x': node.x, 'y': node.y, 'id': pkt.packet_id})
                 
             if node.energy <= 0:
                 # BUG 2: Energy death logging Fix
