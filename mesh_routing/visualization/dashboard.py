@@ -90,7 +90,7 @@ def get_layout():
         dcc.Store(id='active-scenario', data='default'),
         dcc.Store(id='compare-mode', data=False),
         dcc.Store(id='intro-hidden', data=False),
-        dcc.Store(id='sim-running', data=True),
+        dcc.Store(id='sim-running', data=False),
         
         # SECTION A - Top Bar
         html.Div([
@@ -106,7 +106,7 @@ def get_layout():
                 ], style={'display': 'flex', 'alignItems': 'center'}),
             ], style={'display': 'flex', 'gap': '15px', 'background': 'rgba(255,255,255,0.1)', 'padding': '5px 15px', 'borderRadius': '10px'}),
             
-            html.Button("⏹ Stop Simulation", id='btn-start-stop', style={'padding': '8px 20px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer', 'background': '#E67E22', 'color': 'white', 'fontWeight': 'bold'}),
+            html.Button("▶ Start Simulation", id='btn-start-stop', style={'padding': '8px 20px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer', 'background': '#2ECC71', 'color': 'white', 'fontWeight': 'bold'}),
 
             html.Div([
                 html.Button(MODES['beginner']['label'], id='btn-beginner', style={'padding': '8px 15px', 'borderRadius': '5px', 'border': 'none', 'cursor': 'pointer'}),
