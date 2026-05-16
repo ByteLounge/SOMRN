@@ -15,7 +15,14 @@ export default function TopologyCanvas({ frame, protocol, scenarioColor, compact
     return `rgba(${r},${g},80,${0.25 + q * 0.55})`;
   };
 
-  const protoColors = { CPQR: "#10b981", AODV: "#ef4444", OLSR: "#3b82f6", Q_ROUTING: "#a78bfa", PQR: "#f59e0b", DRL: "#06b6d4" };
+  const protoColors = {
+    CPQR:      "#10b981",
+    AODV:      "#ef4444",
+    OLSR:      "#3b82f6",
+    Q_ROUTING: "#a78bfa",
+    PQR:       "#f59e0b",
+    DRL:       "#06b6d4",
+  };
   const pColor = protoColors[protocol] || scenarioColor;
 
   if (!frame) return (

@@ -89,7 +89,7 @@ export function useLocalSim(scenario, protocol, running) {
           id: t + Math.random(), srcId: src.id, dstId: dst.id,
           x: src.x, y: src.y, targetX: dst.x, targetY: dst.y,
           progress: 0, life: 0, hops: Math.floor(1 + Math.random() * 3),
-          predicted: protocol === "CPQR" && Math.random() < 0.55,
+          predicted: ["CPQR","PQR","DRL"].includes(protocol) && Math.random() < 0.55,
         });
         metricRef.current.total++;
       }
@@ -101,7 +101,16 @@ export function useLocalSim(scenario, protocol, running) {
         const dn = nodes[p.dstId];
         if (dn) { p.targetX = dn.x; p.targetY = dn.y; }
         if (p.progress >= 1 || p.life > 120) {
-          const success = p.progress >= 1 || Math.random() > (protocol === "CPQR" ? 0.12 : protocol === "OLSR" ? 0.18 : 0.28);
+          const DROP_RATE = {
+            CPQR:      0.10, // best — predicts congestion
+            DRL:       0.11, // near best — learns deep patterns
+            PQR:       0.14, // predictive q-routing
+            Q_ROUTING: 0.17, // pure q-routing
+            OLSR:      0.20, // proactive but no ML
+            AODV:      0.28, // reactive, no memory
+          };
+          const dropRate = DROP_RATE[protocol] ?? 0.22;
+          const success = p.progress >= 1 || Math.random() > dropRate;
           if (success) {
             metricRef.current.delivered++;
             metricRef.current.delay += 0.1 + p.hops * 0.08 + Math.random() * 0.05;
@@ -115,7 +124,10 @@ export function useLocalSim(scenario, protocol, running) {
       });
       s.packets = alivePkts;
 
-      if (protocol === "CPQR" && t > 80 && Math.random() < 0.002) pushEvent(`🧠 Q-table updated`, "learn");
+      if (["CPQR","Q_ROUTING","DRL","PQR"].includes(protocol) && t > 80 && Math.random() < 0.002) {
+        const labels = { CPQR: "🧠 Q-table updated", Q_ROUTING: "🤖 Q-routing converging", DRL: "🧬 DRL policy updated", PQR: "🔮 PQR rerouting" };
+        pushEvent(labels[protocol] || "🧠 Learning update", "learn");
+      }
       if (t % 60 === 0) nodes.forEach(nd => { if (!nd.dead) nd.energy = Math.max(0, nd.energy - 0.002 * Math.random()); });
 
       const m = metricRef.current;

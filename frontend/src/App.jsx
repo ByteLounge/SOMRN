@@ -17,7 +17,14 @@ const MODES = [
   { id: "results", label: "📊 Analytics" },
 ];
 
-const PROTOCOLS = ["AODV", "OLSR", "CPQR"];
+const PROTOCOLS = [
+  { id: "AODV",      label: "AODV",   color: "#ef4444", backendKey: "aodv",      desc: "Ad hoc On-Demand Distance Vector" },
+  { id: "OLSR",      label: "OLSR",   color: "#3b82f6", backendKey: "olsr",      desc: "Optimised Link State Routing" },
+  { id: "CPQR",      label: "CPQR",   color: "#10b981", backendKey: "cpqr",      desc: "Congestion-Predictive Q-Routing (ours)" },
+  { id: "Q_ROUTING", label: "Q-RTE",  color: "#a78bfa", backendKey: "q_routing", desc: "Q-Routing (pure reinforcement learning)" },
+  { id: "PQR",       label: "PQR",    color: "#f59e0b", backendKey: "pqr",       desc: "Predictive Q-Routing" },
+  { id: "DRL",       label: "DRL",    color: "#06b6d4", backendKey: "drl",       desc: "Deep Reinforcement Learning Routing" },
+];
 
 export default function App() {
   const [mode, setMode]         = useState("story");
@@ -59,11 +66,14 @@ export default function App() {
   const meta = SCENARIOS[scenario];
 
   // ── Handlers ─────────────────────────────────────────────────────────────
+  const activeProto  = PROTOCOLS.find(p => p.id === protocol) || PROTOCOLS[2];
+  const protoColor   = activeProto.color;
+
   const handleStart = () => {
     setRunning(true);
     setShowIntro(false);
     if (status.connected) {
-      startSim({ protocol: protocol.toLowerCase(), scenario, nodes: 30, flows: 5 });
+      startSim({ protocol: activeProto.backendKey, scenario, nodes: 30, flows: 5 });
     }
   };
 
@@ -90,11 +100,12 @@ export default function App() {
     if (status.connected) triggerChaos();
   };
 
-  const handleProtocol = (p) => {
-    setProtocol(p);
-    if (status.connected && running) {
+  const handleProtocol = (pid) => {
+    setProtocol(pid);
+    const proto = PROTOCOLS.find(p => p.id === pid);
+    if (status.connected && running && proto) {
       stopSim();
-      setTimeout(() => startSim({ protocol: p.toLowerCase(), scenario, nodes: 30, flows: 5 }), 300);
+      setTimeout(() => startSim({ protocol: proto.backendKey, scenario, nodes: 30, flows: 5 }), 300);
     }
   };
 
@@ -106,11 +117,11 @@ export default function App() {
     gap: 14, flexWrap: "wrap", position: "sticky", top: 0, zIndex: 100,
   };
 
-  const modeBtn = (active) => ({
+  const modeBtn = (active, color) => ({
     padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
     fontSize: 12, fontWeight: 700, transition: "all 0.2s",
-    background: active ? meta.color : "rgba(255,255,255,0.05)",
-    color: active ? (meta.color === "#3b82f6" ? "#fff" : "#000") : "#64748b",
+    background: active ? (color || meta.color) : "rgba(255,255,255,0.05)",
+    color: active ? "#000" : "#64748b",
   });
 
   const chipBtn = (active) => ({
@@ -170,10 +181,23 @@ export default function App() {
 
         {/* Protocol selector (single/story mode) */}
         {(mode === "single" || mode === "story") && (
-          <div style={{ display: "flex", gap: 3, background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 3 }}>
-            {PROTOCOLS.map(p => (
-              <button key={p} style={modeBtn(protocol === p)} onClick={() => handleProtocol(p)}>{p}</button>
-            ))}
+          <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+            {PROTOCOLS.map(p => {
+              const isActive = protocol === p.id;
+              return (
+                <button key={p.id} title={p.desc}
+                  onClick={() => handleProtocol(p.id)}
+                  style={{
+                    padding: "5px 11px", borderRadius: 8, border: `1px solid ${isActive ? p.color : "rgba(255,255,255,0.07)"}`,
+                    background: isActive ? `${p.color}22` : "rgba(255,255,255,0.04)",
+                    color: isActive ? p.color : "#475569",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "all 0.2s",
+                    fontFamily: "'JetBrains Mono',monospace",
+                  }}>
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -234,7 +258,7 @@ export default function App() {
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: "#334155", fontWeight: 700, textTransform: "uppercase" }}>Protocol</div>
-                <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: meta.color }}>{protocol}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace", color: protoColor }}>{activeProto.label}</div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: "#334155", fontWeight: 700, textTransform: "uppercase" }}>PDR</div>
