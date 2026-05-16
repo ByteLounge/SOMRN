@@ -16,7 +16,7 @@ from config import SimConfig, ScenarioPresets
 from protocols.aodv import AODV
 from protocols.olsr import OLSR
 from protocols.cpqr import CPQR
-from core.mobility import RandomWaypointMobility
+from core.mobility import RandomWaypointMobility, StaticMobility
 
 # New modules
 from visualization.narrator import Narrator
@@ -91,6 +91,7 @@ def get_layout():
         dcc.Store(id='compare-mode', data=False),
         dcc.Store(id='intro-hidden', data=False),
         dcc.Store(id='sim-running', data=False),
+
         
         # SECTION A - Top Bar
         html.Div([
@@ -206,14 +207,40 @@ def create_topo_fig(engine_state, scenario_meta, mode):
         if s_node and t_node:
             quality = e.get('quality', 1.0)
             # Green (1.0) to Red (0.0)
-            color = f"rgba({int(255*(1-quality))}, {int(255*quality)}, 0, 0.4)"
+            color = f"rgba({int(255*(1-quality))}, {int(255*quality)}, 0, 0.1)"
             topo.add_trace(go.Scatter(
                 x=[s_node['x'], t_node['x'], None],
                 y=[s_node['y'], t_node['y'], None],
                 mode='lines',
-                line=dict(color=color, width=1.5),
+                line=dict(color=color, width=1.0),
                 hoverinfo='none'
             ))
+            
+    # Trace Path
+    trace_path = engine_state.topology.get('trace_path', [])
+    if len(trace_path) >= 2:
+        path_x = []
+        path_y = []
+        for node_id in trace_path:
+            n = next((n for n in nodes if n['id'] == node_id), None)
+            if n:
+                path_x.append(n['x'])
+                path_y.append(n['y'])
+        
+        topo.add_trace(go.Scatter(
+            x=path_x, y=path_y,
+            mode='lines',
+            line=dict(color='#3498DB', width=5, dash='solid'),
+            name='Packet Trace Path',
+            hoverinfo='none'
+        ))
+        # Add arrow at the current end of path
+        topo.add_trace(go.Scatter(
+            x=[path_x[-1]], y=[path_y[-1]],
+            mode='markers',
+            marker=dict(size=12, color='#3498DB', symbol='triangle-right'),
+            hoverinfo='none'
+        ))
             
     # Nodes
     if nodes:

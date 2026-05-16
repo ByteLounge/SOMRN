@@ -24,10 +24,25 @@ class SimulationEngine:
         
         # Initialize network
         self.network = WirelessNetwork(config)
-        for i in range(config.num_nodes):
-            x = self.rng.uniform(0, config.area_size)
-            y = self.rng.uniform(0, config.area_size)
-            self.network.add_node(Node(i, x, y, config))
+        
+        if isinstance(mobility_class, type) and mobility_class.__name__ == 'StaticMobility':
+            # Grid placement for better spacing
+            cols = int(np.ceil(np.sqrt(config.num_nodes)))
+            rows = int(np.ceil(config.num_nodes / cols))
+            spacing_x = config.area_size / (cols + 1)
+            spacing_y = config.area_size / (rows + 1)
+            
+            for i in range(config.num_nodes):
+                r = i // cols
+                c = i % cols
+                x = spacing_x * (c + 1) + self.rng.uniform(-10, 10)
+                y = spacing_y * (r + 1) + self.rng.uniform(-10, 10)
+                self.network.add_node(Node(i, x, y, config))
+        else:
+            for i in range(config.num_nodes):
+                x = self.rng.uniform(0, config.area_size)
+                y = self.rng.uniform(0, config.area_size)
+                self.network.add_node(Node(i, x, y, config))
             
         self.network.update_links()
         

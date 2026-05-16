@@ -104,3 +104,12 @@ class GaussMarkovMobility:
                 
             node.x = new_x
             node.y = new_y
+
+class StaticMobility:
+    """Nodes remain stationary."""
+    def __init__(self, nodes: List[Node], config: SimConfig):
+        self.nodes = nodes
+        self.config = config
+
+    def step(self, dt: float):
+        pass
