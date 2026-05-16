@@ -515,9 +515,13 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, running, 
             cfg.num_nodes = num_nodes
             cfg.num_flows = num_flows
 
+            m_cls = RandomWaypointMobility
             if mode in ['beginner', 'intermediate']:
                 cfg.trace_mode = True
                 cfg.packet_rate = 0.5 
+                cfg.max_speed = 0.0
+                cfg.min_speed = 0.0
+                m_cls = StaticMobility
 
             state.narrator = Narrator(state.scenario_meta)
             from protocols.q_routing import QRouting
@@ -533,7 +537,8 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, running, 
             }
             
             p_cls = p_map.get(proto, CPQR)
-            state.primary_engine = SimulationEngine(p_cls, cfg, RandomWaypointMobility)
+            state.primary_engine = SimulationEngine(p_cls, cfg, m_cls)
+            state.primary.topology = state.primary_engine.get_topology_for_dashboard()
             state.primary_chaos = ChaosController(state.primary_engine, state.narrator)
             state.primary_stop_event.clear()
             state.primary_thread = threading.Thread(
@@ -543,7 +548,8 @@ def update_simulation_and_ui(n, mode, compare, scenario, intro_hidden, running, 
             state.primary_thread.start()
             
             if compare:
-                state.secondary_engine = SimulationEngine(AODV, cfg, RandomWaypointMobility)
+                state.secondary_engine = SimulationEngine(AODV, cfg, m_cls)
+                state.secondary.topology = state.secondary_engine.get_topology_for_dashboard()
                 state.secondary_chaos = ChaosController(state.secondary_engine)
                 state.secondary_stop_event.clear()
                 state.secondary_thread = threading.Thread(

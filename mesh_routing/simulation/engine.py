@@ -213,6 +213,7 @@ class SimulationEngine:
                 for pkt in node.queue:
                     if self.config.trace_mode and self.trace_packet and pkt.packet_id == self.trace_packet.packet_id:
                         self.trace_packet = None
+                        self.active_trace_path = []
                     self.metrics.on_drop(pkt, t, "Node Dead")
                     if hasattr(self.protocol, 'on_packet_dropped'):
                         self.protocol.on_packet_dropped(pkt)
