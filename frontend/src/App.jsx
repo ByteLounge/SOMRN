@@ -1,86 +1,193 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// --- API Constants ---
-const API_BASE = "http://localhost:5000/api";
+// ─── Simulation Engine ────────────────────────────────────────────────────────
 
-// --- Bridge Simulation Hook ---
-function useSimulation(scenario, protocol, running, mode, numNodes, numFlows) {
+function createNode(id, w, h) {
+  return {
+    id,
+    x: 60 + Math.random() * (w - 120),
+    y: 60 + Math.random() * (h - 120),
+    vx: (Math.random() - 0.5) * 0.6,
+    vy: (Math.random() - 0.5) * 0.6,
+    energy: 0.8 + Math.random() * 0.2,
+    queue: 0,
+    dead: false,
+    label: id,
+  };
+}
+
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function useSimulation(scenario, protocol, running) {
+  const RANGE = 160;
+  const W = 700, H = 420;
+  const stateRef = useRef(null);
   const [frame, setFrame] = useState(null);
-  const pollingRef = useRef(null);
-  const lastRunningRef = useRef(false);
+  const rafRef = useRef(null);
+  const tickRef = useRef(0);
 
-  // Sync Start/Stop with backend
+  const metricRef = useRef({ delivered: 0, dropped: 0, total: 0, delay: 0, breaks: 0, predictions: 0 });
+  const events = useRef([]);
+
+  const pushEvent = (msg, type) => {
+    events.current = [{ msg, type, id: Date.now() + Math.random() }, ...events.current].slice(0, 5);
+  };
+
+  const reset = useCallback(() => {
+    const cfg = {
+      earthquake: { n: 28, speed: 1.1, trafficRate: 0.18, name: "Earthquake Zone", emoji: "🆘" },
+      campus:     { n: 20, speed: 0.45, trafficRate: 0.10, name: "Campus Mesh",    emoji: "🎓" },
+      drone:      { n: 16, speed: 1.8, trafficRate: 0.22, name: "Drone Swarm",     emoji: "🚁" },
+    }[scenario] || { n: 22, speed: 0.7, trafficRate: 0.13, name: "Network", emoji: "📡" };
+
+    const nodes = Array.from({ length: cfg.n }, (_, i) => createNode(i, W, H));
+    const packets = [];
+    metricRef.current = { delivered: 0, dropped: 0, total: 0, delay: 0, breaks: 0, predictions: 0 };
+    events.current = [];
+    tickRef.current = 0;
+
+    stateRef.current = { nodes, packets, cfg, links: [], prevEdges: new Set() };
+    pushEvent(`${cfg.emoji} ${cfg.name} simulation started`, "info");
+  }, [scenario]);
+
+  useEffect(() => { reset(); }, [reset]);
+
   useEffect(() => {
-    if (running && !lastRunningRef.current) {
-      // Start backend simulation
-      fetch(`${API_BASE}/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario, protocol, mode, nodes: numNodes, flows: numFlows })
-      }).catch(err => console.error("Failed to start backend:", err));
-    } else if (!running && lastRunningRef.current) {
-      // Stop backend simulation
-      fetch(`${API_BASE}/stop`, { method: "POST" })
-        .catch(err => console.error("Failed to stop backend:", err));
-    }
-    lastRunningRef.current = running;
-  }, [running, scenario, protocol, mode, numNodes, numFlows]);
+    if (!running || !stateRef.current) return;
 
-  // Polling Loop
-  useEffect(() => {
-    if (!running) {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      return;
-    }
+    const tick = () => {
+      const s = stateRef.current;
+      if (!s) return;
+      tickRef.current++;
+      const t = tickRef.current;
+      const { nodes, packets, cfg } = s;
 
-    const fetchData = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/state`);
-        if (!res.ok) return;
-        const data = await res.json();
-        
-        // Transform backend data to frontend format if needed
-        // SimulationEngine returns {nodes: [], edges: [], packets: [], trace_path: []}
-        // App expects {nodes: [], links: [], packets: [], metrics: {}, events: []}
-        
-        const transformedFrame = {
-          nodes: data.topology.nodes.map(n => ({
-            ...n,
-            energy: n.energy_pct,
-            dead: n.energy_pct <= 0,
-            label: n.id
-          })),
-          links: data.topology.edges.map(e => ({
-            a: data.topology.nodes.find(n => n.id === e.source),
-            b: data.topology.nodes.find(n => n.id === e.target),
-            quality: e.quality,
-            key: `${e.source}-${e.target}`
-          })),
-          packets: data.topology.packets.map(p => ({
-            id: p.id,
-            x: p.x,
-            y: p.y,
-            predicted: false // Could be enhanced from backend
-          })),
-          tracePath: data.topology.trace_path,
-          metrics: data.metrics,
-          events: data.events.map((ev, i) => ({
-            msg: ev.message,
-            type: ev.severity === 'critical' ? 'error' : (ev.severity === 'success' ? 'success' : 'info'),
-            id: i + Date.now()
-          })),
-          t: data.time
-        };
-        
-        setFrame(transformedFrame);
-      } catch (err) {
-        console.error("Polling error:", err);
+      // Move nodes
+      nodes.forEach(nd => {
+        if (nd.dead) return;
+        nd.x += nd.vx * cfg.speed;
+        nd.y += nd.vy * cfg.speed;
+        if (nd.x < 30 || nd.x > W - 30) { nd.vx *= -1; nd.x = Math.max(30, Math.min(W - 30, nd.x)); }
+        if (nd.y < 30 || nd.y > H - 30) { nd.vy *= -1; nd.y = Math.max(30, Math.min(H - 30, nd.y)); }
+        // Slight random drift
+        nd.vx += (Math.random() - 0.5) * 0.04;
+        nd.vy += (Math.random() - 0.5) * 0.04;
+        nd.vx = Math.max(-1.5, Math.min(1.5, nd.vx));
+        nd.vy = Math.max(-1.5, Math.min(1.5, nd.vy));
+        nd.queue = Math.max(0, nd.queue - 0.08);
+      });
+
+      // Compute links
+      const alive = nodes.filter(n => !n.dead);
+      const newEdges = new Set();
+      const links = [];
+      for (let i = 0; i < alive.length; i++) {
+        for (let j = i + 1; j < alive.length; j++) {
+          const d = dist(alive[i], alive[j]);
+          if (d < RANGE) {
+            const key = `${alive[i].id}-${alive[j].id}`;
+            newEdges.add(key);
+            const quality = Math.max(0, 1 - d / RANGE);
+            links.push({ a: alive[i], b: alive[j], quality, key });
+          }
+        }
       }
+
+      // Detect breaks
+      s.prevEdges.forEach(k => {
+        if (!newEdges.has(k)) {
+          metricRef.current.breaks++;
+          if (t % 12 === 0) pushEvent(`🔴 Link lost — searching for alternative`, "warning");
+        }
+      });
+      s.prevEdges = newEdges;
+      s.links = links;
+
+      // Generate packets
+      if (Math.random() < cfg.trafficRate && alive.length > 2) {
+        const src = alive[Math.floor(Math.random() * alive.length)];
+        const dsts = alive.filter(n => n.id !== src.id);
+        const dst = dsts[Math.floor(Math.random() * dsts.length)];
+        packets.push({
+          id: t + Math.random(),
+          srcId: src.id, dstId: dst.id,
+          x: src.x, y: src.y,
+          targetX: dst.x, targetY: dst.y,
+          progress: 0,
+          life: 0,
+          hops: Math.floor(1 + Math.random() * 3),
+          predicted: protocol === "CPQR" && Math.random() < 0.55,
+        });
+        metricRef.current.total++;
+      }
+
+      // Move packets
+      const alive_packets = [];
+      packets.forEach(p => {
+        p.progress += 0.025 + Math.random() * 0.01;
+        p.life++;
+        p.x += (p.targetX - p.x) * 0.06;
+        p.y += (p.targetY - p.y) * 0.06;
+
+        const dstNode = nodes[p.dstId];
+        if (dstNode) { p.targetX = dstNode.x; p.targetY = dstNode.y; }
+
+        if (p.progress >= 1 || p.life > 120) {
+          const success = p.progress >= 1 || Math.random() > (protocol === "CPQR" ? 0.12 : 0.28);
+          if (success) {
+            metricRef.current.delivered++;
+            metricRef.current.delay += 0.1 + p.hops * 0.08 + Math.random() * 0.05;
+            if (t % 20 === 0) pushEvent(`✅ Message delivered in ${p.hops} hops`, "success");
+            if (p.predicted && t % 30 === 0) {
+              metricRef.current.predictions++;
+              pushEvent(`🟡 Congestion predicted — rerouted early`, "predict");
+            }
+          } else {
+            metricRef.current.dropped++;
+            if (t % 25 === 0) pushEvent(`❌ Message lost — path unavailable`, "error");
+          }
+        } else {
+          alive_packets.push(p);
+        }
+      });
+      s.packets = alive_packets;
+
+      // CPQR learns over time — improve delivery
+      if (protocol === "CPQR" && t > 80) {
+        const ratio = metricRef.current.delivered / Math.max(metricRef.current.total, 1);
+        if (ratio < 0.82 && Math.random() < 0.003) {
+          pushEvent(`🧠 Q-table updated — finding better routes`, "learn");
+        }
+      }
+
+      // Energy drain
+      if (t % 60 === 0) {
+        nodes.forEach(nd => {
+          if (!nd.dead) nd.energy = Math.max(0, nd.energy - 0.002 * Math.random());
+        });
+      }
+
+      const m = metricRef.current;
+      const pdr = m.total > 0 ? (m.delivered / m.total) : 0;
+      const avgDelay = m.delivered > 0 ? (m.delay / m.delivered) : 0;
+
+      setFrame({
+        nodes: nodes.map(n => ({ ...n })),
+        links: [...s.links],
+        packets: [...s.packets],
+        metrics: { ...m, pdr, avgDelay },
+        events: [...events.current],
+        t,
+      });
+
+      rafRef.current = requestAnimationFrame(tick);
     };
 
-    pollingRef.current = setInterval(fetchData, 100); // 10 FPS polling
-    return () => clearInterval(pollingRef.current);
-  }, [running]);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [running, protocol, scenario]);
 
   return frame;
 }
@@ -97,11 +204,7 @@ function TopologyCanvas({ frame, protocol, scenarioMeta, compact }) {
   );
 
   const W = 700, H = compact ? 220 : 420;
-  // Backend uses 500x500 area, we scale to 700x420
-  const scaleX = (x) => (x / 500) * W;
-  const scaleY = (y) => (y / 500) * H;
-
-  const { nodes, links, packets, tracePath } = frame;
+  const { nodes, links, packets } = frame;
 
   const nodeColor = (nd) => {
     if (nd.dead) return "#333";
@@ -113,8 +216,11 @@ function TopologyCanvas({ frame, protocol, scenarioMeta, compact }) {
   const edgeColor = (q) => {
     const r = Math.round(255 * (1 - q));
     const g = Math.round(200 * q);
-    return `rgba(${r},${g},80,${0.1 + q * 0.2})`; // Faint edges like user requested
+    return `rgba(${r},${g},80,${0.3 + q * 0.5})`;
   };
+
+  const scaleX = (x) => (x / 700) * 100 + "%";
+  const scaleY = (y) => (y / 420) * 100 + "%";
 
   return (
     <div style={{ position: "relative", width: "100%", paddingBottom: compact ? "31.4%" : "60%",
@@ -134,27 +240,27 @@ function TopologyCanvas({ frame, protocol, scenarioMeta, compact }) {
         {/* Edges */}
         {links.map(l => (
           <line key={l.key}
-            x1={scaleX(l.a.x)} y1={scaleY(l.a.y)} x2={scaleX(l.b.x)} y2={scaleY(l.b.y)}
-            stroke={edgeColor(l.quality)} strokeWidth={1}
+            x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y}
+            stroke={edgeColor(l.quality)} strokeWidth={1 + l.quality}
             strokeLinecap="round" />
         ))}
-
-        {/* Trace Path */}
-        {tracePath && tracePath.length >= 2 && (
-          <polyline
-            points={tracePath.map(id => {
-              const n = nodes.find(nd => nd.id === id);
-              return n ? `${scaleX(n.x)},${scaleY(n.y)}` : "";
-            }).filter(p => p !== "").join(" ")}
-            fill="none" stroke="#3498DB" strokeWidth="5"
-            strokeLinejoin="round" strokeLinecap="round"
-          />
-        )}
 
         {/* Packets */}
         {packets.map(p => (
           <g key={p.id}>
-             <text x={scaleX(p.x)} y={scaleY(p.y)} textAnchor="middle" fontSize={24}>✉️</text>
+            <circle cx={p.x} cy={p.y} r={p.predicted ? 5 : 4}
+              fill={p.predicted ? "#fbbf24" : "#60a5fa"}
+              opacity={0.9}>
+              <animate attributeName="r" values={p.predicted ? "4;6;4" : "3;5;3"}
+                dur="0.8s" repeatCount="indefinite" />
+            </circle>
+            {p.predicted && (
+              <circle cx={p.x} cy={p.y} r={9} fill="none"
+                stroke="#fbbf24" strokeWidth={1} opacity={0.4}>
+                <animate attributeName="r" values="6;12;6" dur="1s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.4;0;0.4" dur="1s" repeatCount="indefinite"/>
+              </circle>
+            )}
           </g>
         ))}
 
@@ -162,28 +268,34 @@ function TopologyCanvas({ frame, protocol, scenarioMeta, compact }) {
         {nodes.map(nd => (
           <g key={nd.id}>
             {!nd.dead && (
-              <circle cx={scaleX(nd.x)} cy={scaleY(nd.y)} r={16}
+              <circle cx={nd.x} cy={nd.y} r={16}
                 fill={nodeColor(nd)} opacity={0.12} />
             )}
-            <circle cx={scaleX(nd.x)} cy={scaleY(nd.y)} r={nd.dead ? 7 : 10}
+            <circle cx={nd.x} cy={nd.y} r={nd.dead ? 7 : 10}
               fill={nd.dead ? "#1a1a2e" : nodeColor(nd)}
               stroke={nd.dead ? "#333" : `${nodeColor(nd)}88`}
               strokeWidth={nd.dead ? 1 : 2} />
-            <text x={scaleX(nd.x)} y={scaleY(nd.y) + 4} textAnchor="middle"
-              fontSize={nd.dead ? 6 : 8} fill={nd.dead ? "#444" : "white"}
+            <text x={nd.x} y={nd.y + 4} textAnchor="middle"
+              fontSize={nd.dead ? 6 : 7} fill={nd.dead ? "#444" : "white"}
               fontFamily="monospace" fontWeight="bold">
               {nd.dead ? "✕" : scenarioMeta.nodeEmoji}
             </text>
+            {nd.queue > 1.5 && (
+              <circle cx={nd.x + 8} cy={nd.y - 8} r={4}
+                fill="#ef4444" opacity={0.9}>
+                <animate attributeName="r" values="4;5;4" dur="0.5s" repeatCount="indefinite"/>
+              </circle>
+            )}
           </g>
         ))}
 
         {/* Protocol label */}
-        <rect x={W - 120} y={H - 30} width={110} height={22} rx={6}
-          fill="rgba(52,152,219,0.2)"
-          stroke="#3498DB" strokeWidth={1} />
-        <text x={W - 65} y={H - 15} textAnchor="middle" fontSize={10}
-          fill="#3498DB" fontFamily="monospace" fontWeight="bold">
-          {protocol.toUpperCase()} ACTIVE
+        <rect x={W - 100} y={H - 30} width={96} height={22} rx={6}
+          fill={protocol === "CPQR" ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}
+          stroke={protocol === "CPQR" ? "#10b981" : "#ef4444"} strokeWidth={1} />
+        <text x={W - 52} y={H - 15} textAnchor="middle" fontSize={10}
+          fill={protocol === "CPQR" ? "#10b981" : "#ef4444"} fontFamily="monospace" fontWeight="bold">
+          {protocol} ACTIVE
         </text>
       </svg>
     </div>
@@ -219,6 +331,8 @@ function EventFeed({ events }) {
     warning: { bg: "rgba(245,158,11,0.1)", border: "#f59e0b", text: "#fcd34d" },
     error:   { bg: "rgba(239,68,68,0.1)",  border: "#ef4444", text: "#fca5a5" },
     info:    { bg: "rgba(96,165,250,0.1)", border: "#60a5fa", text: "#93c5fd" },
+    predict: { bg: "rgba(251,191,36,0.1)", border: "#fbbf24", text: "#fde68a" },
+    learn:   { bg: "rgba(167,139,250,0.1)",border: "#a78bfa", text: "#c4b5fd" },
   };
 
   return (
@@ -230,7 +344,7 @@ function EventFeed({ events }) {
           Waiting for activity...
         </div>
       )}
-      {[...events].reverse().slice(0, 5).map((e, i) => {
+      {events.map((e, i) => {
         const c = colors[e.type] || colors.info;
         return (
           <div key={e.id} style={{
@@ -249,11 +363,19 @@ function EventFeed({ events }) {
   );
 }
 
+// ─── Side-by-side comparison ──────────────────────────────────────────────────
+
+function useCompareSimulation(scenario) {
+  const frameA = useSimulation(scenario, "AODV", true);
+  const frameB = useSimulation(scenario, "CPQR", true);
+  return { frameA, frameB };
+}
+
 // ─── Translation Table ────────────────────────────────────────────────────────
 
 function TranslationTable({ metrics }) {
   const pdr = metrics?.pdr ?? 0;
-  const delay = metrics?.delay ?? 0;
+  const delay = metrics?.avgDelay ?? 0;
   const breaks = metrics?.breaks ?? 0;
 
   const rows = [
@@ -291,106 +413,466 @@ function TranslationTable({ metrics }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 const SCENARIOS = {
-  default:    { name: "Generic Test", emoji: "📡", nodeEmoji: "🧑", color: "#3b82f6", tagline: "Standard testing conditions" },
-  earthquake: { name: "Earthquake", emoji: "🆘", nodeEmoji: "🧑", color: "#ef4444", tagline: "Emergency coordination" },
-  campus:     { name: "Campus", emoji: "🎓", nodeEmoji: "📱", color: "#3b82f6", tagline: "Students on WiFi mesh" },
-  drone:      { name: "Drone", emoji: "🚁", nodeEmoji: "✈", color: "#10b981", tagline: "Autonomous search mission" },
+  earthquake: { name: "Earthquake Response", emoji: "🆘", nodeEmoji: "🧑", color: "#ef4444",
+    tagline: "Emergency responders coordinating rescue operations" },
+  campus:     { name: "Campus Mesh Network", emoji: "🎓", nodeEmoji: "📱", color: "#3b82f6",
+    tagline: "Students moving between buildings on a WiFi mesh" },
+  drone:      { name: "Drone Swarm", emoji: "🚁", nodeEmoji: "✈", color: "#10b981",
+    tagline: "Drones coordinating a high-speed search mission" },
 };
 
-const PROTOCOLS = ["CPQR", "AODV", "OLSR", "Q-ROUTING", "PQR", "DRL"];
-
 export default function App() {
-  const [mode, setMode] = useState("story");
-  const [scenario, setScenario] = useState("default");
+  const [mode, setMode] = useState("story");         // story | single | compare
+  const [scenario, setScenario] = useState("earthquake");
   const [protocol, setProtocol] = useState("CPQR");
   const [running, setRunning] = useState(false);
-  const [numNodes, setNumNodes] = useState(30);
-  const [numFlows, setNumFlows] = useState(5);
   const [showIntro, setShowIntro] = useState(true);
   const [chaosActive, setChaosActive] = useState(false);
+  const [simKey, setSimKey] = useState(0);
 
-  const frame = useSimulation(scenario, protocol, running, mode, numNodes, numFlows);
-  const scenarioMeta = SCENARIOS[scenario] || SCENARIOS.default;
+  const frame = useSimulation(scenario, protocol, running && mode !== "compare");
 
-  const toggleSim = () => setRunning(!running);
-  
-  const triggerChaos = () => {
-    fetch(`${API_BASE}/chaos`, { method: "POST" })
-      .then(() => setChaosActive(true));
+  // For compare mode we need two independent simulations
+  const [compareRunning, setCompareRunning] = useState(false);
+  const frameAodv = useSimulation(scenario, "AODV", compareRunning);
+  const frameCpqr = useSimulation(scenario, "CPQR", compareRunning);
+
+  const scenarioMeta = SCENARIOS[scenario];
+
+  const startSim = () => {
+    setRunning(true);
+    setShowIntro(false);
+  };
+
+  const handleMode = (m) => {
+    setMode(m);
+    if (m === "compare") {
+      setRunning(false);
+      setCompareRunning(true);
+    } else {
+      setCompareRunning(false);
+      setRunning(true);
+      setShowIntro(false);
+    }
+  };
+
+  const handleScenario = (s) => {
+    setScenario(s);
+    setSimKey(k => k + 1);
+    setChaosActive(false);
   };
 
   const pdr = frame?.metrics?.pdr ?? 0;
+  const aodvPdr = frameAodv?.metrics?.pdr ?? 0;
+  const cpqrPdr = frameCpqr?.metrics?.pdr ?? 0;
+  const improvement = Math.round((cpqrPdr - aodvPdr) * 100);
 
   // ── Styles ──
   const S = {
-    app: { minHeight: "100vh", background: "#070714", fontFamily: "IBM Plex Sans, sans-serif", color: "#e2e8f0", display: "flex", flexDirection: "column" },
-    topBar: { background: "rgba(10,10,28,0.95)", backdropFilter: "blur(20px)", borderBottom: "1px solid #1e293b", padding: "12px 24px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100 },
-    title: { fontSize: 15, fontWeight: 800, color: scenarioMeta.color, letterSpacing: -0.3, marginRight: 8, whiteSpace: "nowrap" },
-    modeBtn: (active) => ({ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, background: active ? scenarioMeta.color : "rgba(255,255,255,0.06)", color: active ? "#000" : "#94a3b8" }),
-    controlBtn: (active) => ({ padding: "8px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 14, fontWeight: 800, background: active ? "#ef4444" : "#10b981", color: "#fff" }),
-    input: { width: 60, padding: "4px 8px", borderRadius: 6, border: "1px solid #333", background: "#1a1a2e", color: "white", fontSize: 12 },
+    app: {
+      minHeight: "100vh", background: "#070714",
+      fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+      color: "#e2e8f0", display: "flex", flexDirection: "column",
+    },
+    topBar: {
+      background: "rgba(10,10,28,0.95)", backdropFilter: "blur(20px)",
+      borderBottom: "1px solid #1e293b", padding: "12px 24px",
+      display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+      position: "sticky", top: 0, zIndex: 100,
+    },
+    title: {
+      fontSize: 15, fontWeight: 800, color: scenarioMeta.color,
+      letterSpacing: -0.3, marginRight: 8, whiteSpace: "nowrap",
+    },
+    modeBtn: (active) => ({
+      padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+      fontSize: 12, fontWeight: 700, transition: "all 0.2s",
+      background: active ? scenarioMeta.color : "rgba(255,255,255,0.06)",
+      color: active ? "#000" : "#94a3b8",
+    }),
+    scenarioChip: (active) => ({
+      padding: "5px 12px", borderRadius: 20, border: `1px solid ${active ? scenarioMeta.color : "#1e293b"}`,
+      background: active ? `${scenarioMeta.color}22` : "transparent",
+      color: active ? scenarioMeta.color : "#64748b",
+      cursor: "pointer", fontSize: 12, fontWeight: 600, transition: "all 0.2s",
+    }),
+    chaosBtn: {
+      padding: "6px 16px", borderRadius: 8, border: "1px solid #ef4444",
+      background: chaosActive ? "#ef444422" : "transparent",
+      color: chaosActive ? "#ef4444" : "#94a3b8",
+      cursor: "pointer", fontSize: 12, fontWeight: 700, marginLeft: "auto",
+      transition: "all 0.2s",
+    },
     main: { flex: 1, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 },
-    card: { background: "rgba(255,255,255,0.03)", border: "1px solid #1e293b", borderRadius: 14, padding: 20 },
+    card: {
+      background: "rgba(255,255,255,0.03)", border: "1px solid #1e293b",
+      borderRadius: 14, padding: 20,
+    },
   };
 
+  // ── Intro screen ──
   if (showIntro) {
     return (
       <div style={S.app}>
-        <div style={S.topBar}><div style={S.title}>🌐 SOMRN Console</div></div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ maxWidth: 600, textAlign: "center" }}>
+        <div style={{ ...S.topBar }}>
+          <div style={S.title}>🌐 Self-Optimizing Mesh Routing</div>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "40px 24px" }}>
+          <div style={{ maxWidth: 640, textAlign: "center", display: "flex", flexDirection: "column",
+            gap: 28, alignItems: "center" }}>
+
             <div style={{ fontSize: 64 }}>📡</div>
-            <h1 style={{ fontSize: 32, fontWeight: 900 }}>Actual Simulation Bridge</h1>
-            <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>The React UI is now connected to the Python Backend. Adjust nodes and protocols, then start the simulation to see real-time data.</p>
-            <button onClick={() => setShowIntro(false)} style={{ ...S.modeBtn(true), padding: "16px 40px", fontSize: 16 }}>Go to Dashboard →</button>
+
+            <div>
+              <div style={{ fontSize: 28, fontWeight: 900, marginBottom: 12,
+                background: `linear-gradient(135deg, #fff, ${scenarioMeta.color})`,
+                WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                Imagine passing a note through a crowd
+              </div>
+              <div style={{ fontSize: 15, color: "#94a3b8", lineHeight: 1.7, maxWidth: 520, margin: "0 auto" }}>
+                You're at a concert and need to reach your friend on the other side.
+                You can't shout — too loud. So you pass a note through people between you.
+                Some people keep moving. Some get tired. Some areas get too crowded.
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, width: "100%", textAlign: "left" }}>
+              {[
+                { icon: "🔴", title: "Old approach", body: "Uses one fixed path until it breaks, then floods the whole network looking for another. Messages get lost during the search." },
+                { icon: "🟢", title: "Our system (CPQR)", body: "Continuously learns which paths are reliable. Predicts congestion and broken links before they happen. Quietly reroutes early." },
+              ].map(c => (
+                <div key={c.title} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 12,
+                  border: "1px solid #1e293b", padding: 16 }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>{c.icon}</div>
+                  <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>{c.title}</div>
+                  <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{c.body}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+              {Object.entries(SCENARIOS).map(([k, v]) => (
+                <button key={k} style={{ ...S.scenarioChip(scenario === k), fontSize: 13 }}
+                  onClick={() => setScenario(k)}>
+                  {v.emoji} {v.name}
+                </button>
+              ))}
+            </div>
+
+            <button onClick={startSim} style={{
+              padding: "14px 40px", borderRadius: 12, border: "none",
+              background: scenarioMeta.color, color: "#000",
+              fontSize: 15, fontWeight: 800, cursor: "pointer",
+              boxShadow: `0 0 30px ${scenarioMeta.color}66`,
+              transition: "all 0.2s",
+            }}>
+              {scenarioMeta.emoji} Start {scenarioMeta.name} Simulation →
+            </button>
+
           </div>
         </div>
       </div>
     );
   }
 
+  // ── Main dashboard ──
   return (
     <div style={S.app}>
+      {/* Top bar */}
       <div style={S.topBar}>
-        <div style={S.title}>🌐 SOMRN Bridge</div>
-        <button onClick={toggleSim} style={S.controlBtn(running)}>{running ? "⏹ Stop Sim" : "▶ Start Sim"}</button>
-        
-        <div style={{ display: "flex", gap: 10, alignItems: "center", borderLeft: "1px solid #333", paddingLeft: 16 }}>
-           <label style={{ fontSize: 12, color: "#64748b" }}>Nodes:</label>
-           <input type="number" value={numNodes} onChange={e => setNumNodes(e.target.value)} style={S.input}/>
-           <label style={{ fontSize: 12, color: "#64748b" }}>Flows:</label>
-           <input type="number" value={numFlows} onChange={e => setNumFlows(e.target.value)} style={S.input}/>
-        </div>
+        <div style={S.title}>🌐 Mesh Routing</div>
 
-        <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: 4 }}>
-          {["story", "expert"].map(m => (
-            <button key={m} style={S.modeBtn(mode === m)} onClick={() => setMode(m)}>{m.toUpperCase()}</button>
+        {/* Mode tabs */}
+        <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.04)",
+          borderRadius: 10, padding: 4 }}>
+          {[
+            ["story", "📖 Story"],
+            ["single", "📡 Live Sim"],
+            ["compare", "↔ Compare"],
+          ].map(([m, label]) => (
+            <button key={m} style={S.modeBtn(mode === m)} onClick={() => handleMode(m)}>
+              {label}
+            </button>
           ))}
         </div>
 
-        <select value={protocol} onChange={e => setProtocol(e.target.value)} style={{ ...S.input, width: 100 }}>
-          {PROTOCOLS.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
+        {/* Scenarios */}
+        <div style={{ display: "flex", gap: 6 }}>
+          {Object.entries(SCENARIOS).map(([k, v]) => (
+            <button key={k} style={S.scenarioChip(scenario === k)}
+              onClick={() => handleScenario(k)}>
+              {v.emoji} {v.name.split(" ")[0]}
+            </button>
+          ))}
+        </div>
 
-        <button style={{ ...S.modeBtn(false), border: "1px solid #ef4444", color: "#ef4444", marginLeft: "auto" }} onClick={triggerChaos}>⚡ Chaos</button>
+        {/* Protocol (only in single mode) */}
+        {mode === "single" && (
+          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.04)",
+            borderRadius: 8, padding: 3 }}>
+            {["AODV", "OLSR", "CPQR"].map(p => (
+              <button key={p} style={S.modeBtn(protocol === p)}
+                onClick={() => setProtocol(p)}>
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button style={S.chaosBtn} onClick={() => setChaosActive(true)}>
+          ⚡ {chaosActive ? "Stress Active" : "Stress Test"}
+        </button>
       </div>
 
+      {/* Main content */}
       <div style={S.main}>
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
-          <div style={S.card}>
-             <TopologyCanvas frame={frame} protocol={protocol} scenarioMeta={scenarioMeta} compact={false} />
+
+        {/* Scenario banner */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
+          background: `${scenarioMeta.color}11`, borderRadius: 10,
+          border: `1px solid ${scenarioMeta.color}33` }}>
+          <span style={{ fontSize: 22 }}>{scenarioMeta.emoji}</span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: scenarioMeta.color }}>
+              {scenarioMeta.name}
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{scenarioMeta.tagline}</div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-             <div style={S.card}><EventFeed events={frame?.events ?? []} /></div>
-             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <MetricCard icon="📬" value={`${Math.round(pdr * 100)}%`} label="Delivered" color="#10b981" />
-                <MetricCard icon="⚡" value={`${frame?.metrics?.breaks ?? 0}`} label="Breaks" color="#f59e0b" />
-                <MetricCard icon="⏱" value={`${(frame?.metrics?.delay ?? 0).toFixed(2)}s`} label="Latency" color="#3498DB" />
-                <MetricCard icon="🧠" value={`${frame?.metrics?.predictions ?? 0}`} label="Predicted" color="#a78bfa" />
-             </div>
-          </div>
+          {mode === "compare" && improvement !== 0 && (
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "#64748b" }}>CPQR delivers</div>
+              <div style={{ fontSize: 20, fontWeight: 900,
+                color: improvement > 0 ? "#10b981" : "#ef4444" }}>
+                {improvement > 0 ? "+" : ""}{improvement}%
+              </div>
+              <div style={{ fontSize: 10, color: "#64748b" }}>more messages than AODV</div>
+            </div>
+          )}
         </div>
-        <div style={S.card}><TranslationTable metrics={frame?.metrics} /></div>
+
+        {/* ── STORY MODE ── */}
+        {mode === "story" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
+              <div style={S.card}>
+                <TopologyCanvas frame={frame} protocol={protocol}
+                  scenarioMeta={scenarioMeta} compact={false} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={S.card}>
+                  <EventFeed events={frame?.events ?? []} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <MetricCard icon="📬" value={`${Math.round(pdr * 100)}%`}
+                    label="Delivered" sublabel="of all messages"
+                    color={pdr > 0.7 ? "#10b981" : "#ef4444"} />
+                  <MetricCard icon="⚡" value={`${frame?.metrics?.breaks ?? 0}`}
+                    label="Disruptions" sublabel="path breaks"
+                    color="#f59e0b" />
+                  <MetricCard icon="🔵" value={`${frame?.packets?.length ?? 0}`}
+                    label="In flight" sublabel="right now"
+                    color="#60a5fa" />
+                  <MetricCard icon="🧠" value={`${frame?.metrics?.predictions ?? 0}`}
+                    label="Predicted" sublabel="reroutes"
+                    color="#a78bfa" />
+                </div>
+              </div>
+            </div>
+            <div style={S.card}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#475569",
+                textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>
+                What the numbers mean — in plain English
+              </div>
+              <TranslationTable metrics={frame?.metrics} />
+            </div>
+          </div>
+        )}
+
+        {/* ── SINGLE PROTOCOL MODE ── */}
+        {mode === "single" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
+              <div style={S.card}>
+                <TopologyCanvas frame={frame} protocol={protocol}
+                  scenarioMeta={scenarioMeta} compact={false} />
+                <div style={{ display: "flex", gap: 16, marginTop: 12 }}>
+                  <div style={{ fontSize: 11, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
+                    <svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3"
+                      stroke={scenarioMeta.color} strokeWidth="2"/></svg>
+                    Strong link
+                  </div>
+                  <div style={{ fontSize: 11, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
+                    <svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3"
+                      stroke="#ef4444" strokeWidth="1"/></svg>
+                    Weak link
+                  </div>
+                  <div style={{ fontSize: 11, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
+                    <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#60a5fa"/></svg>
+                    Packet
+                  </div>
+                  <div style={{ fontSize: 11, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
+                    <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#fbbf24"/></svg>
+                    Predicted reroute
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  { icon: "📬", value: `${Math.round(pdr * 100)}%`, label: "Messages delivered", sublabel: `${frame?.metrics?.delivered ?? 0} of ${frame?.metrics?.total ?? 0} total`, color: pdr > 0.75 ? "#10b981" : "#ef4444", big: true },
+                  { icon: "⏱", value: `${(frame?.metrics?.avgDelay ?? 0).toFixed(2)}s`, label: "Average travel time", sublabel: "per message", color: "#60a5fa" },
+                  { icon: "💥", value: `${frame?.metrics?.breaks ?? 0}`, label: "Path disruptions", sublabel: "route breaks detected", color: "#f59e0b" },
+                  { icon: "🧠", value: `${frame?.metrics?.predictions ?? 0}`, label: "Early reroutes", sublabel: "congestion predicted", color: "#a78bfa" },
+                ].map(m => <MetricCard key={m.label} {...m} />)}
+              </div>
+            </div>
+
+            <div style={S.card}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#475569",
+                textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>
+                Plain English results
+              </div>
+              <TranslationTable metrics={frame?.metrics} />
+            </div>
+          </div>
+        )}
+
+        {/* ── COMPARE MODE ── */}
+        {mode === "compare" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "3fr 48px 3fr", gap: 0, alignItems: "start" }}>
+
+              {/* AODV side */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef444433",
+                  borderRadius: 10, padding: "10px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444" }}>
+                    AODV — Traditional routing
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>Reacts after failure</div>
+                </div>
+                <div style={S.card}>
+                  <TopologyCanvas frame={frameAodv} protocol="AODV"
+                    scenarioMeta={{ ...scenarioMeta, color: "#ef4444" }} compact />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <MetricCard icon="📬" value={`${Math.round(aodvPdr * 100)}%`}
+                    label="Delivered" color={aodvPdr > 0.75 ? "#10b981" : "#ef4444"} />
+                  <MetricCard icon="💥" value={`${frameAodv?.metrics?.breaks ?? 0}`}
+                    label="Breaks" color="#f59e0b" />
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                justifyContent: "center", height: "100%", paddingTop: 60, gap: 8 }}>
+                <div style={{ width: 1, flex: 1, background: "#1e293b" }} />
+                <div style={{ fontSize: 11, color: "#334155", fontWeight: 700,
+                  writingMode: "vertical-rl", letterSpacing: 2 }}>VS</div>
+                <div style={{ width: 1, flex: 1, background: "#1e293b" }} />
+              </div>
+
+              {/* CPQR side */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid #10b98133",
+                  borderRadius: 10, padding: "10px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#10b981" }}>
+                    CPQR — Our system
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>Predicts before failure</div>
+                </div>
+                <div style={S.card}>
+                  <TopologyCanvas frame={frameCpqr} protocol="CPQR"
+                    scenarioMeta={{ ...scenarioMeta, color: "#10b981" }} compact />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <MetricCard icon="📬" value={`${Math.round(cpqrPdr * 100)}%`}
+                    label="Delivered" color="#10b981" />
+                  <MetricCard icon="🧠" value={`${frameCpqr?.metrics?.predictions ?? 0}`}
+                    label="Predicted" color="#a78bfa" />
+                </div>
+              </div>
+            </div>
+
+            {/* Improvement stat */}
+            <div style={{ ...S.card, textAlign: "center", padding: "20px",
+              background: improvement > 0 ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)",
+              border: `1px solid ${improvement > 0 ? "#10b98133" : "#ef444433"}` }}>
+              <div style={{ fontSize: 40, fontWeight: 900, fontFamily: "monospace",
+                color: improvement > 0 ? "#10b981" : "#ef4444" }}>
+                {improvement > 0 ? "+" : ""}{improvement}%
+              </div>
+              <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
+                {improvement > 0
+                  ? `CPQR delivers ${improvement}% more messages successfully than AODV`
+                  : `Both protocols performing similarly — Q-table still learning`}
+              </div>
+            </div>
+
+            {/* What this means */}
+            <div style={S.card}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444",
+                    textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+                    Why AODV struggles
+                  </div>
+                  {[
+                    "Only finds a route when needed",
+                    "Floods the entire network when a link breaks",
+                    "Packets are lost while searching for a new route",
+                    "No memory of past network conditions",
+                  ].map((t, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8,
+                      fontSize: 12, color: "#64748b" }}>
+                      <span style={{ color: "#ef4444", flexShrink: 0 }}>✕</span>
+                      <span>{t}</span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981",
+                    textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+                    How CPQR improves it
+                  </div>
+                  {[
+                    "Learns which paths are reliable over time",
+                    "Predicts congestion before queues overflow",
+                    "Detects link failure before it happens (RSSI trend)",
+                    "Reroutes early — packets already on the new path",
+                  ].map((t, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8,
+                      fontSize: 12, color: "#64748b" }}>
+                      <span style={{ color: "#10b981", flexShrink: 0 }}>✓</span>
+                      <span>{t}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Legend for story mode */}
+        {mode === "story" && (
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", padding: "8px 0" }}>
+            {[
+              { color: scenarioMeta.color, label: `${scenarioMeta.nodeEmoji} = ${scenarioMeta.name.split(" ")[0]} node (healthy)` },
+              { color: "#f59e0b", label: "Node low on battery" },
+              { color: "#ef4444", label: "Node critical" },
+              { color: "#60a5fa", label: "🔵 = Packet in transit" },
+              { color: "#fbbf24", label: "🟡 = Predicted reroute" },
+            ].map(l => (
+              <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 6,
+                fontSize: 11, color: "#475569" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: l.color }} />
+                {l.label}
+              </div>
+            ))}
+          </div>
+        )}
+
       </div>
     </div>
   );

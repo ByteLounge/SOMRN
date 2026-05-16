@@ -3,6 +3,8 @@ from flask_cors import CORS
 import threading
 import time
 import logging
+import os
+import csv
 from typing import Dict, List, Optional
 import numpy as np
 
@@ -164,11 +166,11 @@ def get_state():
     metrics = {
         "delivered": len(state.engine.metrics.delivered),
         "dropped": len(state.engine.metrics.dropped),
-        "total": state.engine.metrics.total_sent,
-        "delay": state.engine.metrics.avg_delay,
+        "total": len(state.engine.metrics.sent),
+        "delay": state.engine.metrics.avg_delay if hasattr(state.engine.metrics, 'avg_delay') else 0.0,
         "breaks": state.engine.metrics.route_breaks,
         "predictions": getattr(state.engine.metrics, 'proactive_reroutes', 0),
-        "pdr": state.engine.metrics.pdr
+        "pdr": state.engine.metrics.pdr if hasattr(state.engine.metrics, 'pdr') else 0.0
     }
     
     # Get narrative feed
@@ -190,6 +192,40 @@ def trigger_chaos():
         state.chaos.trigger()
         return jsonify({"status": "triggered"})
     return jsonify({"error": "No simulation active"}), 400
+
+@app.route('/api/results', methods=['GET'])
+def get_results():
+    """Return pre-computed CSV results from the results/ directory."""
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
+    data = {}
+    try:
+        for fname in os.listdir(results_dir):
+            if fname.endswith('.csv'):
+                proto = fname.split('_')[0].upper()
+                fpath = os.path.join(results_dir, fname)
+                rows = []
+                with open(fpath, 'r', newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        cleaned = {}
+                        for k, v in row.items():
+                            k = k.strip().strip('\r')
+                            v = v.strip().strip('\r')
+                            try:
+                                cleaned[k] = float(v)
+                            except ValueError:
+                                cleaned[k] = v
+                        rows.append(cleaned)
+                data[proto] = rows
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify(data)
+
+
+@app.route('/api/protocols', methods=['GET'])
+def get_protocols():
+    return jsonify(['aodv', 'olsr', 'cpqr', 'q_routing', 'pqr', 'drl'])
+
 
 if __name__ == '__main__':
     app.run(port=5000, debug=False)
